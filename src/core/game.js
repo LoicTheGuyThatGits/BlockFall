@@ -74,6 +74,7 @@ export class Game {
     this.lockTimer = 0;
     this.lockResets = 0;
     this.grounded = false;
+    this.lowered = false; // has touched down since spawn
     this.softDropping = false;
     this.softDropCells = 0; // cells soft-dropped on the current piece
     this.bufferedHardDrop = false;
@@ -105,6 +106,7 @@ export class Game {
     this.lockTimer = 0;
     this.lockResets = 0;
     this.grounded = false;
+    this.lowered = false;
     this.softDropping = false;
     this.lastAction = 'none';
     this.lastKickIndex = 0;
@@ -228,11 +230,23 @@ export class Game {
     return false;
   }
 
+  /**
+   * A move or rotation extends the lock delay, but only up to a fixed budget.
+   *
+   * The budget is spent on any move made *after the piece has touched down*,
+   * not only on moves made while it is resting. A wall kick can lift the piece
+   * back off the stack for a frame, so testing `grounded` here would let a
+   * player hover a piece indefinitely: gravity pulls it down, the next kick
+   * lifts it up, and the lock timer never accumulates.
+   */
   onPieceMoved() {
-    // Lock delay resets when the piece is moved or rotated after landing.
-    if (this.grounded && this.lockResets < MAX_LOCK_RESETS) {
+    if (!this.lowered) return;
+    if (this.lockResets < MAX_LOCK_RESETS) {
       this.lockTimer = 0;
       this.lockResets++;
+    } else {
+      // Out of budget: the piece drops right now rather than hovering.
+      this.lockPiece();
     }
   }
 
@@ -495,34 +509,53 @@ export class Game {
     }
     if (this.entryTimer > 0 || !this.piece) return;
 
+    /*
+     * Grounding is checked every frame, not only when gravity steps.
+     *
+     * Gravity can be slow (a full second per row at level 1), so deriving
+     * "is it resting" from the gravity step left a piece that was plainly
+     * sitting on the stack reporting itself as still falling for up to a
+     * second. Spinning it in that window kicked it back up before the lock
+     * delay could ever start, which let a piece hover indefinitely.
+     */
+    this.grounded = this.collides(this.piece, this.rot, this.px, this.py + 1);
+
     const g = gravityForLevel(this.level) * 1000;
     const step = this.softDropping ? g / SOFT_DROP_FACTOR : g;
     this.gravityAcc += deltaMs;
 
     let steps = 0;
-    while (this.gravityAcc >= step && steps < ROWS) {
+    while (!this.grounded && this.gravityAcc >= step && steps < ROWS) {
       this.gravityAcc -= step;
       steps++;
       if (!this.collides(this.piece, this.rot, this.px, this.py + 1)) {
         this.py++;
         // Only soft-dropped cells score; natural gravity is free.
         if (this.softDropping) this.softDropCells++;
-        this.grounded = false;
         this.lockTimer = 0;
       } else {
-        this.grounded = true;
         break;
       }
     }
+    // Settle the flag after any movement in the loop above.
+    this.grounded = this.collides(this.piece, this.rot, this.px, this.py + 1);
     if (this.gravityAcc > 1000) this.gravityAcc = 0; // avoid a spiral of death
 
-    // Lock delay.
+    /*
+     * Lock delay.
+     *
+     * The timer runs while the piece is resting on something. `lowered` marks
+     * that it has touched down at least once since spawning, which is what
+     * arms the reset budget in onPieceMoved().
+     */
     if (this.grounded) {
+      this.lowered = true;
       this.lockTimer += deltaMs;
       if (this.lockTimer >= LOCK_DELAY_MS) {
         this.lockPiece();
       }
-    } else {
+    } else if (!this.lowered) {
+      // Still falling from the spawn: nothing to lock yet.
       this.lockTimer = 0;
     }
 

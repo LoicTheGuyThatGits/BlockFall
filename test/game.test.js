@@ -5,7 +5,7 @@ import { Game, encodeBoard, decodeBoard } from '../src/core/game.js';
 import { Bag, makeRng } from '../src/core/rng.js';
 import { scoreClear, linesForLevel, levelForLines } from '../src/core/scoring.js';
 import { cellsFor, kicksFor } from '../src/core/pieces.js';
-import { COLS, ROWS, PIECE_IDS } from '../src/core/constants.js';
+import { COLS, ROWS, PIECE_IDS, MAX_LOCK_RESETS } from '../src/core/constants.js';
 
 /** Place a piece and instantly lock it, bypassing the animation. */
 function forceLock(g, type, rot, x, y) {
@@ -200,6 +200,106 @@ test('topping out sets the dead flag and emits an event', () => {
   assert.equal(g.dead, true);
   const events = g.drainEvents().map((e) => e.type);
   assert.ok(events.includes('topout'));
+});
+
+/**
+ * Put a piece resting on a flat floor, optionally rotated, and report whether
+ * it ever locks. Used to prove no input pattern can hold a piece forever.
+ */
+function spinUntilLock(type, policy, maxFrames = 1200) {
+  const g = new Game({ seed: 1 });
+  for (let x = 0; x < COLS; x++) g.board[(ROWS - 1) * COLS + x] = 2;
+
+  g.piece = type;
+  g.rot = 0;
+  g.px = 4;
+  g.py = ROWS - 2;
+  g.grounded = false;
+  g.lowered = false;
+  g.lockTimer = 0;
+  g.lockResets = 0;
+  g.lastAction = 'none';
+
+  for (let f = 0; f < maxFrames; f++) {
+    policy(g, f);
+    g.tick(1000 / 60);
+    if (g.pieces > 0) return { locked: true, frames: f, resets: g.lockResets };
+  }
+  return { locked: false, frames: maxFrames, resets: g.lockResets, py: g.py };
+}
+
+test('a piece resting on the stack is grounded immediately, not on the next gravity step', () => {
+  // At level 1 gravity is one row per second, so the old bug left a resting
+  // piece reporting itself as falling for up to a second.
+  const g = new Game({ seed: 1 });
+  for (let x = 0; x < COLS; x++) g.board[(ROWS - 1) * COLS + x] = 2;
+  g.piece = 'T';
+  g.rot = 0;
+  g.px = 4;
+  g.py = ROWS - 2;
+
+  g.tick(1000 / 60);
+  assert.equal(g.grounded, true, 'grounding must be detected on the very first frame');
+  assert.equal(g.lowered, true, 'and it must arm the lock delay immediately');
+});
+
+test('spamming rotate cannot stop a piece from locking', () => {
+  for (const type of ['I', 'J', 'L', 'O', 'S', 'T', 'Z']) {
+    for (const [label, policy] of [
+      ['every frame', (g) => g.rotate(1)],
+      ['every 10th frame', (g, f) => f % 10 === 0 && g.rotate(1)],
+      ['after landing', (g, f) => f >= 5 && g.rotate(1)],
+    ]) {
+      const r = spinUntilLock(type, policy);
+      assert.ok(r.locked, `${type} spun ${label} never locked (held at row ${r.py})`);
+    }
+  }
+});
+
+test('spinning alternately both ways also locks', () => {
+  for (const type of ['I', 'J', 'L', 'S', 'T', 'Z']) {
+    const r = spinUntilLock(type, (g, f) => g.rotate(f % 2 === 0 ? 1 : -1));
+    assert.ok(r.locked, `${type} spun alternately never locked (held at row ${r.py})`);
+  }
+});
+
+test('the lock reset budget is respected and cannot be farmed', () => {
+  // Rotating every frame spends the budget as fast as possible, then the
+  // piece must lock even though the player is still rotating.
+  for (const every of [1, 10, 40]) {
+    const r = spinUntilLock('T', (g, f) => f % every === 0 && g.rotate(1));
+    assert.ok(r.locked, `rotating every ${every} frames never locked`);
+    assert.ok(r.resets <= MAX_LOCK_RESETS, `spent ${r.resets} resets, budget is ${MAX_LOCK_RESETS}`);
+  }
+});
+
+test('the lock delay measures about half a second', () => {
+  const g = new Game({ seed: 1 });
+  for (let x = 0; x < COLS; x++) g.board[(ROWS - 1) * COLS + x] = 2;
+  g.piece = 'T';
+  g.rot = 0;
+  g.px = 4;
+  g.py = ROWS - 2;
+
+  let groundedAt = null;
+  let lockedAt = null;
+  for (let f = 0; f < 600 && g.pieces === 0; f++) {
+    g.tick(1000 / 60);
+    if (g.grounded && groundedAt === null) groundedAt = f;
+    if (g.pieces > 0) lockedAt = f;
+  }
+  assert.ok(groundedAt !== null && lockedAt !== null, 'the piece should land and lock');
+  const delay = lockedAt - groundedAt;
+  // 500ms at 60fps is 30 frames; allow a frame either side.
+  assert.ok(delay >= 28 && delay <= 32, `lock delay was ${delay} frames, expected ~30`);
+});
+
+test('a hard drop still locks on the frame it is issued', () => {
+  const g = new Game({ seed: 1 });
+  for (let x = 0; x < COLS; x++) g.board[(ROWS - 1) * COLS + x] = 2;
+  g.input({ hardDrop: true });
+  g.tick(1000 / 60);
+  assert.equal(g.pieces, 1);
 });
 
 test('soft drop never bursts when it starts', () => {
