@@ -167,6 +167,18 @@ function handleMessage(ws, msg) {
         if (!room) {
           return send(ws, { t: MSG.ERROR, message: `No room called ${msg.code}` });
         }
+        /*
+         * A match in progress cannot take a new player. Games are created when
+         * a match starts, so a mid-match joiner would be seated with no board,
+         * unable to play, and in versus mode their presence would immediately
+         * decide the match. Spectators are still welcome.
+         */
+        if (room.status === 'playing' && !msg.asSpectator) {
+          return send(ws, {
+            t: MSG.ERROR,
+            message: 'That match has already started. Watch as a spectator, or wait for it to finish.',
+          });
+        }
         // Private rooms are still joinable by code, which is the whole point.
         const full = room.players.size >= room.settings.maxPlayers;
         if (full && !(msg.asSpectator && room.settings.allowSpectators)) {

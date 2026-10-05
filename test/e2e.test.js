@@ -126,6 +126,71 @@ test('two clients join the same room by code', async () => {
   b.close();
 });
 
+test('the snapshot reports whether hold has been spent', async () => {
+  // Without this the client cannot know hold is a one-shot, and would allow a
+  // second swap that the server rejects, so the piece visibly changed.
+  const { Game } = await import('../src/core/game.js');
+
+  const g = new Game({ seed: 7 });
+  assert.equal('hu' in g.snapshot(), true, 'the snapshot must carry the hold flag');
+
+  const before = g.snapshot();
+  assert.equal(before.hu, 0, 'hold starts available');
+
+  g.input({ hold: true });
+  const after = g.snapshot();
+  assert.equal(after.hu, 1, 'hold must be reported as spent');
+
+  // Adopting a spent snapshot must prevent a second hold.
+  const adopted = new Game({ seed: 7 });
+  adopted.hold = after.h;
+  adopted.piece = after.p;
+  adopted.rot = after.r;
+  adopted.px = after.x;
+  adopted.py = after.y;
+  adopted.holdUsed = after.hu === 1;
+
+  const pieceAfterAdopt = adopted.piece;
+  const holdAfterAdopt = adopted.hold;
+  assert.equal(adopted.input({ hold: true }), false, 'a second hold must be refused');
+  assert.equal(adopted.piece, pieceAfterAdopt, 'the piece must not change');
+  assert.equal(adopted.hold, holdAfterAdopt, 'the hold box must not change');
+});
+
+test('a client that replays an in-flight hold still matches the server', async () => {
+  const { Game } = await import('../src/core/game.js');
+  const settle = (g) => {
+    if (g.clearAnim > 0) {
+      g.clearAnim = 0;
+      g.finishLock();
+    }
+  };
+
+  const server = new Game({ seed: 99 });
+  const client = new Game({ seed: 99 });
+  server.input({ hardDrop: true });
+  settle(server);
+  client.input({ hardDrop: true });
+  settle(client);
+
+  // The server has now processed the hold the client predicted.
+  server.input({ hold: true });
+  const snap = server.snapshot();
+
+  client.hold = snap.h;
+  client.piece = snap.p;
+  client.rot = snap.r;
+  client.px = snap.x;
+  client.py = snap.y;
+  client.holdUsed = snap.hu === 1;
+
+  // Replaying the hold must be a no-op, not a second swap.
+  client.input({ hold: true });
+
+  assert.equal(client.piece, server.piece, 'both sides are on the same piece');
+  assert.equal(client.hold, server.hold, 'both hold boxes match');
+});
+
 test('snapshot revisions increase and never go backwards', async () => {
   const c = connect();
   await c.open;
@@ -271,6 +336,67 @@ test('the garbage value in a snapshot stays in range', async () => {
   assert.ok(g.pg >= 0, 'pending garbage must not be negative');
   assert.ok(g.s <= 100000, 'score should stay sane');
   c.close();
+});
+
+test('joining a match already in progress is refused', async () => {
+  // A mid-match joiner gets no game, so they could not play, and in versus
+  // mode their seat would immediately decide the match.
+  const a = connect();
+  const b = connect();
+  await Promise.all([a.open, b.open]);
+
+  a.send({ t: MSG.JOIN, name: 'Host', color: '#22d3ee', settings: { mode: 'versus' } });
+  const first = await a.next((m) => m.t === MSG.ROOM_STATE);
+  b.send({ t: MSG.JOIN, name: 'B', color: '#a855f7', code: first.code });
+  await b.next((m) => m.t === MSG.ROOM_STATE && m.players.length === 2);
+
+  for (const c of [a, b]) c.send({ t: MSG.SET_READY, ready: true });
+  await a.next((m) => m.t === MSG.ROOM_STATE && m.players.every((p) => p.ready));
+  a.send({ t: MSG.START });
+  await a.next((m) => m.t === MSG.GAME_START);
+
+  // A third player tries to join the running match.
+  const c = connect();
+  await c.open;
+  c.send({ t: MSG.JOIN, name: 'Late', color: '#facc15', code: first.code });
+  const err = await c.next((m) => m.t === MSG.ERROR);
+  assert.match(err.message, /already started/i);
+
+  // The seated players are unaffected.
+  const state = await a.next(
+    (m) => m.t === MSG.ROOM_STATE && m.status === 'playing' && m.players.length === 2
+  );
+  assert.equal(state.status, 'playing');
+  for (const p of state.players) {
+    assert.ok(state.boards[p.id], `${p.name} should still have a board`);
+  }
+
+  c.close();
+  a.close();
+  b.close();
+});
+
+test('a spectator can still watch a match in progress', async () => {
+  const a = connect();
+  const s = connect();
+  await Promise.all([a.open, s.open]);
+
+  a.send({ t: MSG.JOIN, name: 'Host', color: '#22d3ee', settings: { mode: 'marathon' } });
+  const first = await a.next((m) => m.t === MSG.ROOM_STATE);
+  a.send({ t: MSG.SET_READY, ready: true });
+  await a.next((m) => m.t === MSG.ROOM_STATE && m.players[0].ready);
+  a.send({ t: MSG.START });
+  await a.next((m) => m.t === MSG.GAME_START);
+
+  s.send({ t: MSG.JOIN, name: 'Watcher', color: '#a855f7', code: first.code, asSpectator: true });
+  const hello = await s.next((m) => m.t === MSG.HELLO && m.spectatorId);
+  assert.ok(hello.spectatorId, 'the watcher should get a spectator seat');
+
+  const state = await s.next((m) => m.t === MSG.ROOM_STATE && m.status === 'playing');
+  assert.ok(state.boards, 'a spectator still receives the boards to watch');
+
+  s.close();
+  a.close();
 });
 
 test('joining a room that does not exist returns an error', async () => {

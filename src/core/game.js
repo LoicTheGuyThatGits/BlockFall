@@ -610,6 +610,10 @@ export class Game {
       x: this.px,
       y: this.py,
       h: this.hold,
+      // Hold is a one-shot per piece. Without this flag the client cannot tell
+      // that hold has been spent, and would allow a second swap that the
+      // server rejects, making the piece change under the player's hands.
+      hu: this.holdUsed ? 1 : 0,
       n: this.bag.peek(5),
       // Only the preview is sent normally; a client that adopts a snapshot
       // needs the whole queue, so that is requested with { full: true }.

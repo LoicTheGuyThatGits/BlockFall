@@ -76,6 +76,7 @@ export class Room {
       pendingInput: null,
       finishedAt: null,
       dyingHandled: false,
+      queueSynced: false, // a fresh joiner needs the full piece queue
       lastSeen: Date.now(),
       pps: 0,
       ppsMark: 0,
@@ -187,6 +188,7 @@ export class Room {
       p.pieceMark = 0;
       p.ppsMark = this.startedAt;
       p.ready = false;
+      p.queueSynced = false; // resend the full queue on the next snapshot
     }
 
     this.broadcast(MSG.GAME_START, {
@@ -384,14 +386,25 @@ export class Room {
   }
 
   /**
+   * A client needs the full piece queue whenever it adopts a fresh snapshot as
+   * its baseline: at the start of a match, and when it (re)joins one already in
+   * progress. Without it, a late joiner would fall back to its own idea of the
+   * queue and diverge from the server.
+   */
+  needsFullQueue(p) {
+    return this.status !== 'playing' || !p.queueSynced;
+  }
+
+  /**
    * @param {object} opts
-   * @param {boolean} opts.full   include each full piece queue (used on start)
+   * @param {boolean} opts.full   include each full piece queue
    * @param {boolean} opts.stats  include end-of-match statistics
    */
   buildState({ full = false, stats = false } = {}) {
     const boards = {};
     for (const p of this.players.values()) {
-      boards[p.id] = this.snapshotFor(p, { full, stats });
+      boards[p.id] = this.snapshotFor(p, { full: full || this.needsFullQueue(p), stats });
+      if (boards[p.id]) p.queueSynced = true;
     }
     return {
       code: this.code,

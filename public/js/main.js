@@ -362,13 +362,16 @@ function wireNet(net) {
 
   net.on(MSG.ERROR, (msg) => {
   toast(msg.message || 'Error');
-  // A room that no longer exists cannot be rejoined; go back to the menu.
-  if (/No room called/.test(msg.message || '') && state.roomCode) {
+  // A room that cannot be rejoined (lost to a restart, or a match that has
+  // already begun) means our seat is gone. Return to the menu rather than
+  // leaving a dead board on screen.
+  const gone = /No room called|already started|room is full/i;
+  if (gone.test(msg.message || '') && state.roomCode) {
     state.roomCode = null;
     state.room = null;
     stopGame();
     showScreen('menu');
-    toast('That room is gone. Create a new one to keep playing.');
+    toast(msg.message || 'That room is gone. Create a new one to keep playing.');
   }
 });
 
@@ -672,16 +675,23 @@ function reconcile(msg) {
   if (encodeLocalBoard(state.game) === snap.b) return; // prediction matched
 
   const g = state.game;
-  // The full piece queue only arrives on the opening snapshot, so keep
-  // whatever we already have rather than inventing a new order.
-  if (!snap.q) snap.q = g.bag.queue.slice();
+  /*
+   * The server sends the full piece queue when a client first needs one: at the
+   * start of a match and when joining one already running. If it is missing
+   * here then our queue is already correct (we are mid-match and in sync), so
+   * keep it rather than inventing a new order.
+   */
+  if (snap.q) g.bag.queue = snap.q.slice();
   g.board = decodeInto(g.board, snap.b);
   g.piece = snap.p;
   g.rot = snap.r;
   g.px = snap.x;
   g.py = snap.y;
   g.hold = snap.h;
-  g.holdUsed = false; // server does not track this across snapshots
+  // Hold is once per piece; the server is authoritative about whether it has
+  // been spent. Guessing here let the client swap twice, and the piece would
+  // visibly change once the server's snapshot came back.
+  g.holdUsed = typeof snap.hu === 'number' ? snap.hu === 1 : g.holdUsed;
   g.score = snap.s;
   g.lines = snap.l;
   g.level = snap.lv;
@@ -694,7 +704,6 @@ function reconcile(msg) {
   g.stats = snap.st || g.stats;
   g.elapsed = snap.t || 0;
   g.garbageTimer = 0;
-  g.bag.queue = snap.q.slice();
   g.softDropping = false; // the server sends soft drop as separate events
 
   for (const p of state.pendingInputs) g.input(p.input);
