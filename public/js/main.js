@@ -47,6 +47,7 @@ const state = {
   rafId: null,
   disposed: false, // set by teardown()
   pendingInputs: [], // inputs sent but not yet reflected in a snapshot
+  rev: 0, // revision of the last snapshot applied; bumped by local prediction
   serverTimeOffset: 0, // server clock minus browser clock
   overData: null,
 };
@@ -637,16 +638,32 @@ function runCountdown(from) {
 const REPLAY_WINDOW_MS = 130;
 
 /**
+ * Revision of the last server snapshot applied.
+ *
+ * The client bumps this when it predicts a change of its own, so snapshots the
+ * server built before that point are recognised as stale and skipped.
+ */
+
+/**
  * Reconcile the locally predicted board with the server's authoritative one.
  *
- * The server is always right. If the board disagrees, we adopt the server
- * board and re-apply only the inputs that are likely still in flight, which
- * hides the network round trip without a full rollback implementation.
+ * The server is always right, but a snapshot built from a state we have
+ * already predicted past must be ignored: adopting it would briefly undo the
+ * player's own move, which showed up as the piece vanishing and reappearing
+ * when a lock landed. The `rev` counter makes staleness detectable, so a
+ * superseded snapshot is dropped rather than applied.
+ *
+ * When a genuinely newer snapshot disagrees with the prediction, the server
+ * board is adopted and the still-in-flight inputs are replayed on top.
  */
 function reconcile(msg) {
   if (state.solo || !state.game) return;
   const snap = msg.boards?.[state.myId];
   if (!snap) return;
+
+  // Already applied, or built from a state we have predicted past.
+  if (typeof snap.rev === 'number' && snap.rev <= state.rev) return;
+  state.rev = typeof snap.rev === 'number' ? snap.rev : state.rev + 1;
 
   // Drop inputs old enough that the server has certainly seen them.
   const cutoff = Date.now() - REPLAY_WINDOW_MS;
@@ -780,6 +797,10 @@ function sendInput(input) {
   // Predict locally so input feels instant, then tell the server.
   state.game.input(input);
   if (state.solo) return;
+
+  // Predicting past the server means snapshots it has already sent describe
+  // a state we have moved on from. Advancing `rev` marks those as stale.
+  state.rev++;
   state.pendingInputs.push({ input, at: Date.now() });
   if (state.pendingInputs.length > 120) state.pendingInputs.shift();
   state.net?.send({ t: MSG.INPUT, input });

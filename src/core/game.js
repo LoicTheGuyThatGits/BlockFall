@@ -70,6 +70,17 @@ export class Game {
     this.startedAt = 0;
     this.elapsed = 0;
 
+    /*
+     * Monotonic counter for authoritative state changes.
+     *
+     * A client that predicts ahead of the server will receive snapshots built
+     * from older states. Comparing boards alone cannot tell "the server is
+     * behind me" apart from "we desynced", so reconciliation used to roll the
+     * client backwards and re-apply, which flickered. With this counter a
+     * client can simply ignore any snapshot it has already superseded.
+     */
+    this.rev = 0;
+
     this.gravityAcc = 0;
     this.lockTimer = 0;
     this.lockResets = 0;
@@ -256,6 +267,7 @@ export class Game {
     this.hold = this.piece;
     this.holdUsed = true;
     this.stats.holds++;
+    this.rev++;
     this.spawn(swap || null);
     this.emit('hold', { piece: this.hold });
     return true;
@@ -273,6 +285,7 @@ export class Game {
 
   /** Merge the piece into the board and resolve any full rows. */
   lockPiece(dropDistance = 0) {
+    this.rev++;
     const piece = this.piece;
     const rot = this.rot;
     const cells = this.activeCells();
@@ -448,6 +461,7 @@ export class Game {
 
   /** Splice the queued garbage into the board. */
   applyGarbage(count) {
+    this.rev++;
     const rows = Math.min(count, ROWS);
     for (let i = 0; i < rows; i++) {
       const hole = 1 + (this.bag.rng.int(COLS - 2));
@@ -589,6 +603,7 @@ export class Game {
    */
   snapshot({ full = false, stats = false } = {}) {
     const snap = {
+      rev: this.rev,
       b: encodeBoard(this.board),
       p: this.piece,
       r: this.rot,

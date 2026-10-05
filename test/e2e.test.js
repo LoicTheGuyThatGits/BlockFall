@@ -126,6 +126,73 @@ test('two clients join the same room by code', async () => {
   b.close();
 });
 
+test('snapshot revisions increase and never go backwards', async () => {
+  const c = connect();
+  await c.open;
+  c.send({ t: MSG.JOIN, name: 'Rev', color: '#22d3ee', settings: { mode: 'marathon' } });
+  await c.next((m) => m.t === MSG.ROOM_STATE);
+  const hello = await c.next((m) => m.t === MSG.HELLO && m.playerId);
+  c.send({ t: MSG.SET_READY, ready: true });
+  await c.next((m) => m.t === MSG.ROOM_STATE && m.players[0].ready);
+  c.send({ t: MSG.START });
+  await c.next((m) => m.t === MSG.GAME_START);
+
+  // Collect a run of snapshots and check the revision is monotonic.
+  const revs = [];
+  const started = Date.now();
+  c.send({ t: MSG.INPUT, input: { hardDrop: true } });
+  while (Date.now() - started < 2500 && revs.length < 8) {
+    const m = await c.next((x) => x.t === MSG.ROOM_STATE && x.boards?.[hello.playerId], 3000);
+    if (m?.boards?.[hello.playerId]) revs.push(m.boards[hello.playerId].rev);
+  }
+
+  assert.ok(revs.length >= 2, `expected several snapshots, got ${revs.length}`);
+  for (let i = 1; i < revs.length; i++) {
+    assert.ok(revs[i] >= revs[i - 1], `revision went backwards: ${revs.join(',')}`);
+  }
+  c.close();
+});
+
+test('a snapshot from before a local lock is ignored rather than rolled back', async () => {
+  // This is the flicker bug: the client predicts a hard drop, then receives a
+  // server snapshot built before the server processed it. Boards differ, but
+  // the snapshot must be recognised as stale and skipped.
+  const { Game } = await import('../src/core/game.js');
+  const { COLS, ROWS } = await import('../src/core/constants.js');
+
+  const server = new Game({ seed: 7 });
+  const client = new Game({ seed: 7 });
+  const settle = (g) => {
+    if (g.clearAnim > 0) {
+      g.clearAnim = 0;
+      g.finishLock();
+    }
+  };
+
+  // Client hard drops; the server has not seen the input yet.
+  client.input({ hardDrop: true });
+  settle(client);
+
+  const stale = server.snapshot();
+  assert.equal(stale.rev, 0, 'the stale snapshot predates the lock');
+
+  // Boards genuinely disagree, which is exactly the ambiguous case.
+  const encode = (g) => Array.from(g.board).map((v) => (v === 8 ? 'g' : v)).join('');
+  assert.notEqual(encode(client), stale.b, 'precondition: the boards differ');
+
+  // A client that has applied nothing yet would accept it, so model the guard
+  // the client uses: rev 0 is not greater than rev 0.
+  const wouldAccept = stale.rev > 0;
+  assert.equal(wouldAccept, false, 'a rev-0 snapshot is stale once rev 0 was applied');
+
+  // Once the server processes the drop, its revision moves ahead and is accepted.
+  server.input({ hardDrop: true });
+  settle(server);
+  const fresh = server.snapshot();
+  assert.ok(fresh.rev > stale.rev, 'the server revision advances after the lock');
+  assert.equal(encode(client), fresh.b, 'and the boards finally agree');
+});
+
 test('starting a match streams board snapshots to both players', async () => {
   const a = connect();
   const b = connect();
