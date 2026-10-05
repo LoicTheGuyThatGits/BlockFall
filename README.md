@@ -1,806 +1,469 @@
-# undici
+# lru-cache
 
-[![Node CI](https://github.com/nodejs/undici/actions/workflows/ci.yml/badge.svg)](https://github.com/nodejs/undici/actions/workflows/nodejs.yml) [![neostandard javascript style](https://img.shields.io/badge/neo-standard-7fffff?style=flat\&labelColor=ff80ff)](https://github.com/neostandard/neostandard) [![npm version](https://badge.fury.io/js/undici.svg)](https://badge.fury.io/js/undici) [![codecov](https://codecov.io/gh/nodejs/undici/branch/main/graph/badge.svg?token=yZL6LtXkOA)](https://codecov.io/gh/nodejs/undici)
+A cache object that deletes the least-recently-used items.
 
-An HTTP/1.1 client, written from scratch for Node.js.
+Specify a max number of the most recently used items that you
+want to keep, and this cache will keep that many of the most
+recently accessed items.
 
-> Undici means eleven in Italian. 1.1 -> 11 -> Eleven -> Undici.
-It is also a Stranger Things reference.
+This is not primarily a TTL cache, and does not make strong TTL
+guarantees. There is no preemptive pruning of expired items by
+default, but you _may_ set a TTL on the cache or on a single
+`set`. If you do so, it will treat expired items as missing, and
+delete them when fetched. If you are more interested in TTL
+caching than LRU caching, check out
+[@isaacs/ttlcache](http://npm.im/@isaacs/ttlcache).
 
-## How to get involved
+As of version 7, this is one of the most performant LRU
+implementations available in JavaScript, and supports a wide
+diversity of use cases. However, note that using some of the
+features will necessarily impact performance, by causing the
+cache to have to do more work. See the "Performance" section
+below.
 
-Have a question about using Undici? Open a [Q&A Discussion](https://github.com/nodejs/undici/discussions/new) or join our official OpenJS [Slack](https://openjs-foundation.slack.com/archives/C01QF9Q31QD) channel.
-
-Looking to contribute? Start by reading the [contributing guide](./CONTRIBUTING.md)
-
-## Install
-
-```
-npm i undici
-```
-
-## Benchmarks
-
-The benchmark is a simple getting data [example](https://github.com/nodejs/undici/blob/main/benchmarks/benchmark.js) using
-50 TCP connections with a pipelining depth of 10 running on Node 24.14.1.
-
-### HTTP/1.1
-
-```
-┌────────────────────────┬─────────┬────────────────────┬────────────┬─────────────────────────┐
-│  Tests                 │ Samples │ Result             │ Tolerance  │ Difference with slowest │
-├────────────────────────┼─────────┼────────────────────┼────────────┼─────────────────────────┤
-│  'node-fetch'          │ 50      │ '4711.86 req/sec'  │ '± 2.92 %' │ '-'                     │
-│  'undici - fetch'      │ 75      │ '5438.50 req/sec'  │ '± 2.97 %' │ '+ 15.42 %'             │
-│  'axios'               │ 45      │ '5448.08 req/sec'  │ '± 2.98 %' │ '+ 15.62 %'             │
-│  'request'             │ 65      │ '5809.63 req/sec'  │ '± 2.90 %' │ '+ 23.30 %'             │
-│  'http - no keepalive' │ 35      │ '5910.77 req/sec'  │ '± 2.87 %' │ '+ 25.44 %'             │
-│  'got'                 │ 50      │ '6047.80 req/sec'  │ '± 2.91 %' │ '+ 28.35 %'             │
-│  'superagent'          │ 60      │ '7534.53 req/sec'  │ '± 2.97 %' │ '+ 59.91 %'             │
-│  'http - keepalive'    │ 75      │ '9343.41 req/sec'  │ '± 2.90 %' │ '+ 98.30 %'             │
-│  'undici - pipeline'   │ 65      │ '13470.70 req/sec' │ '± 2.93 %' │ '+ 185.89 %'            │
-│  'undici - request'    │ 80      │ '16850.87 req/sec' │ '± 2.93 %' │ '+ 257.63 %'            │
-│  'undici - stream'     │ 101     │ '18488.56 req/sec' │ '± 3.81 %' │ '+ 292.38 %'            │
-│  'undici - dispatch'   │ 101     │ '20786.44 req/sec' │ '± 3.08 %' │ '+ 341.15 %'            │
-└────────────────────────┴─────────┴────────────────────┴────────────┴─────────────────────────┘
-```
-
-### HTTP/1.1 over HTTPS
-
-Using [benchmark-https.js](https://github.com/nodejs/undici/blob/main/benchmarks/benchmark-https.js) against an h1-over-TLS server (50 connections, pipelining depth 10, Node 24.14.1).
-
-```
-┌────────────────────────┬─────────┬───────────────────┬────────────┬─────────────────────────┐
-│  Tests                 │ Samples │ Result            │ Tolerance  │ Difference with slowest │
-├────────────────────────┼─────────┼───────────────────┼────────────┼─────────────────────────┤
-│  'https - no keepalive'│ 10      │ '1358.40 req/sec' │ '± 1.99 %' │ '-'                     │
-│  'undici - fetch'      │ 30      │ '3721.76 req/sec' │ '± 2.97 %' │ '+ 173.98 %'            │
-│  'https - keepalive'   │ 35      │ '5633.91 req/sec' │ '± 2.84 %' │ '+ 314.75 %'            │
-│  'undici - pipeline'   │ 15      │ '6254.05 req/sec' │ '± 2.80 %' │ '+ 360.40 %'            │
-│  'undici - request'    │ 25      │ '6669.80 req/sec' │ '± 2.73 %' │ '+ 391.01 %'            │
-│  'undici - stream'     │ 25      │ '7019.04 req/sec' │ '± 2.77 %' │ '+ 416.71 %'            │
-│  'undici - dispatch'   │ 20      │ '7361.85 req/sec' │ '± 2.90 %' │ '+ 441.95 %'            │
-└────────────────────────┴─────────┴───────────────────┴────────────┴─────────────────────────┘
-```
-
-### HTTP/2
-
-Using [benchmark-http2.js](https://github.com/nodejs/undici/blob/main/benchmarks/benchmark-http2.js) against an h2 server (50 connections, pipelining depth 10, Node 24.14.1).
-
-```
-┌────────────────────────┬─────────┬───────────────────┬────────────┬─────────────────────────┐
-│  Tests                 │ Samples │ Result            │ Tolerance  │ Difference with slowest │
-├────────────────────────┼─────────┼───────────────────┼────────────┼─────────────────────────┤
-│  'undici - fetch'      │ 45      │ '3499.03 req/sec' │ '± 2.93 %' │ '-'                     │
-│  'native - http2'      │ 25      │ '4904.58 req/sec' │ '± 2.81 %' │ '+ 40.17 %'             │
-│  'undici - pipeline'   │ 60      │ '5836.82 req/sec' │ '± 2.99 %' │ '+ 66.81 %'             │
-│  'undici - request'    │ 65      │ '6831.25 req/sec' │ '± 2.83 %' │ '+ 95.23 %'             │
-│  'undici - stream'     │ 55      │ '6874.30 req/sec' │ '± 2.91 %' │ '+ 96.46 %'             │
-│  'undici - dispatch'   │ 55      │ '7791.23 req/sec' │ '± 2.96 %' │ '+ 122.67 %'            │
-└────────────────────────┴─────────┴───────────────────┴────────────┴─────────────────────────┘
-```
-
-## Undici vs. Fetch
-
-### Overview
-
-Node.js includes a built-in `fetch()` implementation powered by undici starting from Node.js v18. However, there are important differences between using the built-in fetch and installing undici as a separate module.
-
-### Built-in Fetch (Node.js v18+)
-
-Node.js's built-in fetch is powered by a bundled version of undici:
-
-```js
-// Available globally in Node.js v18+
-const response = await fetch('https://api.example.com/data');
-const data = await response.json();
-
-// Check the bundled undici version
-console.log(process.versions.undici); // e.g., "5.28.4"
-```
-
-**Pros:**
-- No additional dependencies required
-- Works across different JavaScript runtimes
-- Automatic compression handling (gzip, deflate, br)
-- Built-in caching support (in development)
-
-**Cons:**
-- Limited to the undici version bundled with your Node.js version
-- Less control over connection pooling and advanced features
-- Error handling follows Web API standards (errors wrapped in `TypeError`)
-- Performance overhead due to Web Streams implementation
-
-### Undici Module
-
-Installing undici as a separate module gives you access to the latest features and APIs:
+## Installation
 
 ```bash
-npm install undici
+npm install lru-cache --save
 ```
 
-```js
-import { request, fetch, Agent, setGlobalDispatcher } from 'undici';
-
-// Use undici.request for maximum performance
-const { statusCode, headers, body } = await request('https://api.example.com/data');
-const data = await body.json();
-
-// Or use undici.fetch with custom configuration
-const agent = new Agent({ keepAliveTimeout: 10000 });
-setGlobalDispatcher(agent);
-const response = await fetch('https://api.example.com/data');
-```
-
-**Pros:**
-- Latest undici features and bug fixes
-- Access to advanced APIs (`request`, `stream`, `pipeline`)
-- Fine-grained control over connection pooling
-- Better error handling with clearer error messages
-- Superior performance, especially with `undici.request`
-- HTTP/1.1 pipelining support
-- Custom interceptors and middleware
-- Advanced features like `ProxyAgent`, `Socks5Agent`, `MockAgent`
-
-**Cons:**
-- Additional dependency to manage
-- Larger bundle size
-
-### When to Use Each
-
-#### Use Built-in Fetch When:
-- You want zero dependencies
-- Building isomorphic code that runs in browsers and Node.js
-- Publishing to npm and want to maximize compatibility with JS runtimes
-- Simple HTTP requests without advanced configuration
-- You're publishing to npm and you want to maximize compatiblity
-- You don't depend on features from a specific version of undici
-
-#### Use Undici Module When:
-- You need the latest undici features and performance improvements
-- You require advanced connection pooling configuration
-- You need APIs not available in the built-in fetch (`ProxyAgent`, `Socks5Agent`, `MockAgent`, etc.)
-- Performance is critical (use `undici.request` for maximum speed)
-- You want better error handling and debugging capabilities
-- You need HTTP/1.1 pipelining or advanced interceptors
-- You prefer decoupled protocol and API interfaces
-
-### Performance Comparison
-
-Based on benchmarks, here's the typical performance hierarchy:
-
-1. **`undici.request()`** - Fastest, most efficient
-2. **`undici.fetch()`** - Good performance, standard compliance
-3. **Node.js `http`/`https`** - Baseline performance
-
-### Migration Guide
-
-If you're currently using built-in fetch and want to migrate to undici:
+## Usage
 
 ```js
-// Before: Built-in fetch
-const response = await fetch('https://api.example.com/data');
+// hybrid module, either works
+import { LRUCache } from 'lru-cache'
+// or:
+const { LRUCache } = require('lru-cache')
+// or in minified form for web browsers:
+import { LRUCache } from 'http://unpkg.com/lru-cache@9/dist/mjs/index.min.mjs'
 
-// After: Undici fetch (drop-in replacement)
-import { fetch } from 'undici';
-const response = await fetch('https://api.example.com/data');
+// At least one of 'max', 'ttl', or 'maxSize' is required, to prevent
+// unsafe unbounded storage.
+//
+// In most cases, it's best to specify a max for performance, so all
+// the required memory allocation is done up-front.
+//
+// All the other options are optional, see the sections below for
+// documentation on what each one does.  Most of them can be
+// overridden for specific items in get()/set()
+const options = {
+  max: 500,
 
-// Or: Undici request (better performance)
-import { request } from 'undici';
-const { statusCode, body } = await request('https://api.example.com/data');
-const data = await body.json();
-```
+  // for use with tracking overall storage size
+  maxSize: 5000,
+  sizeCalculation: (value, key) => {
+    return 1
+  },
 
-### Keep `fetch` and `FormData` together
+  // for use when you need to clean up something when objects
+  // are evicted from the cache
+  dispose: (value, key, reason) => {
+    freeFromMemoryOrWhatever(value)
+  },
 
-When you send a `FormData` body, keep `fetch` and `FormData` from the same
-implementation.
+  // for use when you need to know that an item is being inserted
+  // note that this does NOT allow you to prevent the insertion,
+  // it just allows you to know about it.
+  onInsert: (value, key, reason) => {
+    logInsertionOrWhatever(key, value)
+  },
 
-Use one of these patterns:
+  // how long to live in ms
+  ttl: 1000 * 60 * 5,
 
-```js
-// Built-in globals
-const body = new FormData()
-body.set('name', 'some')
-await fetch('https://example.com', {
-  method: 'POST',
-  body
-})
-```
+  // return stale items before removing from cache?
+  allowStale: false,
 
-```js
-// undici module imports
-import { fetch, FormData } from 'undici'
+  updateAgeOnGet: false,
+  updateAgeOnHas: false,
 
-const body = new FormData()
-body.set('name', 'some')
-await fetch('https://example.com', {
-  method: 'POST',
-  body
-})
-```
-
-If you want the installed `undici` package to provide the globals, call
-`install()` first:
-
-```js
-import { install } from 'undici'
-
-install()
-
-const body = new FormData()
-body.set('name', 'some')
-await fetch('https://example.com', {
-  method: 'POST',
-  body
-})
-```
-
-`install()` replaces the global `fetch`, `Headers`, `Response`, `Request`, and
-`FormData` implementations with undici's versions, so they all match. It also
-installs undici's `WebSocket`, `CloseEvent`, `ErrorEvent`, `MessageEvent`, and
-`EventSource` globals.
-
-Avoid mixing a global `FormData` with `undici.fetch()`, or `undici.FormData`
-with the built-in global `fetch()`.
-
-### Version Compatibility
-
-You can check which version of undici is bundled with your Node.js version:
-
-```js
-console.log(process.versions.undici);
-```
-
-Installing undici as a module allows you to use a newer version than what's bundled with Node.js, giving you access to the latest features and performance improvements.
-
-## Quick Start
-
-### Basic Request
-
-```js
-import { request } from 'undici'
-
-const {
-  statusCode,
-  headers,
-  trailers,
-  body
-} = await request('http://localhost:3000/foo')
-
-console.log('response received', statusCode)
-console.log('headers', headers)
-
-for await (const data of body) { console.log('data', data) }
-
-console.log('trailers', trailers)
-```
-
-### Using Cache Interceptor
-
-Undici provides a powerful HTTP caching interceptor that follows HTTP caching best practices. Here's how to use it:
-
-```js
-import { fetch, Agent, interceptors, cacheStores } from 'undici';
-
-// Create a client with cache interceptor
-const client = new Agent().compose(interceptors.cache({
-  // Optional: Configure cache store (defaults to MemoryCacheStore)
-  store: new cacheStores.MemoryCacheStore({
-    maxSize: 100 * 1024 * 1024, // 100MB
-    maxCount: 1000,
-    maxEntrySize: 5 * 1024 * 1024 // 5MB
-  }),
-  
-  // Optional: Specify which HTTP methods to cache (default: ['GET', 'HEAD'])
-  methods: ['GET', 'HEAD']
-}));
-
-// Set the global dispatcher to use our caching client
-setGlobalDispatcher(client);
-
-// Now all fetch requests will use the cache
-async function getData() {
-  const response = await fetch('https://api.example.com/data');
-  // The server should set appropriate Cache-Control headers in the response
-  // which the cache will respect based on the cache policy
-  return response.json();
+  // async method to use for cache.fetch(), for
+  // stale-while-revalidate type of behavior
+  fetchMethod: async (key, staleValue, { options, signal, context }) => {},
 }
 
-// First request - fetches from origin
-const data1 = await getData();
+const cache = new LRUCache(options)
 
-// Second request - served from cache if within max-age
-const data2 = await getData();
+cache.set('key', 'value')
+cache.get('key') // "value"
+
+// non-string keys ARE fully supported
+// but note that it must be THE SAME object, not
+// just a JSON-equivalent object.
+var someObject = { a: 1 }
+cache.set(someObject, 'a value')
+// Object keys are not toString()-ed
+cache.set('[object Object]', 'a different value')
+assert.equal(cache.get(someObject), 'a value')
+// A similar object with same keys/values won't work,
+// because it's a different object identity
+assert.equal(cache.get({ a: 1 }), undefined)
+
+cache.clear() // empty the cache
 ```
 
-#### Key Features:
-- **Automatic Caching**: Respects `Cache-Control` and `Expires` headers
-- **Validation**: Supports `ETag` and `Last-Modified` validation
-- **Storage Options**: In-memory or persistent SQLite storage
-- **Flexible**: Configure cache size, TTL, and more
+If you put more stuff in the cache, then less recently used items
+will fall out. That's what an LRU cache is.
 
-## Global Installation
+For full description of the API and all options, please see [the
+LRUCache typedocs](https://isaacs.github.io/node-lru-cache/)
 
-Undici provides an `install()` function to add fetch-related and other web API classes to `globalThis`, making them available globally:
+## Storage Bounds Safety
 
-```js
-import { install } from 'undici'
+This implementation aims to be as flexible as possible, within
+the limits of safe memory consumption and optimal performance.
 
-// Install undici's global web APIs
-install()
+At initial object creation, storage is allocated for `max` items.
+If `max` is set to zero, then some performance is lost, and item
+count is unbounded. Either `maxSize` or `ttl` _must_ be set if
+`max` is not specified.
 
-// Now you can use fetch classes globally without importing
-const response = await fetch('https://api.example.com/data')
-const data = await response.json()
+If `maxSize` is set, then this creates a safe limit on the
+maximum storage consumed, but without the performance benefits of
+pre-allocation. When `maxSize` is set, every item _must_ provide
+a size, either via the `sizeCalculation` method provided to the
+constructor, or via a `size` or `sizeCalculation` option provided
+to `cache.set()`. The size of every item _must_ be a positive
+integer.
 
-// All classes are available globally:
-const headers = new Headers([['content-type', 'application/json']])
-const request = new Request('https://example.com')
-const formData = new FormData()
-const ws = new WebSocket('wss://example.com')
-const eventSource = new EventSource('https://example.com/events')
-```
+If neither `max` nor `maxSize` are set, then `ttl` tracking must
+be enabled. Note that, even when tracking item `ttl`, items are
+_not_ preemptively deleted when they become stale, unless
+`ttlAutopurge` is enabled. Instead, they are only purged the
+next time the key is requested. Thus, if `ttlAutopurge`, `max`,
+and `maxSize` are all not set, then the cache will potentially
+grow unbounded.
 
-The `install()` function adds the following classes to `globalThis`:
+In this case, a warning is printed to standard error. Future
+versions may require the use of `ttlAutopurge` if `max` and
+`maxSize` are not specified.
 
-- `fetch` - The fetch function
-- `Headers` - HTTP headers management
-- `Response` - HTTP response representation
-- `Request` - HTTP request representation
-- `FormData` - Form data handling
-- `WebSocket` - WebSocket client
-- `CloseEvent`, `ErrorEvent`, `MessageEvent` - WebSocket events
-- `EventSource` - Server-sent events client
+If you truly wish to use a cache that is bound _only_ by TTL
+expiration, consider using a `Map` object, and calling
+`setTimeout` to delete entries when they expire. It will perform
+much better than an LRU cache.
 
-When you call `install()`, these globals come from the same undici
-implementation. For example, global `fetch` and global `FormData` will both be
-undici's versions, and `WebSocket` and `EventSource` will also come from
-undici, which is the recommended setup if you want to use undici through
-globals.
-
-This is useful for:
-- Polyfilling environments that don't have fetch
-- Ensuring consistent fetch behavior across different Node.js versions
-- Making undici's implementations available globally for libraries that expect them
-
-## Body Mixins
-
-The `body` mixins are the most common way to format the request/response body. Mixins include:
-
-- [`.arrayBuffer()`](https://fetch.spec.whatwg.org/#dom-body-arraybuffer)
-- [`.blob()`](https://fetch.spec.whatwg.org/#dom-body-blob)
-- [`.bytes()`](https://fetch.spec.whatwg.org/#dom-body-bytes)
-- [`.json()`](https://fetch.spec.whatwg.org/#dom-body-json)
-- [`.text()`](https://fetch.spec.whatwg.org/#dom-body-text)
-
-> [!NOTE]
-> The body returned from `undici.request` does not implement `.formData()`.
-
-> [!WARNING]
-> The body mixins `.arrayBuffer()`, `.blob()`, `.bytes()`, `.json()`, `.text()`,
-> and `.formData()` buffer the entire body in memory before returning. Where
-> applicable, they also decode or parse the payload and retain that
-> representation in memory. Calling these methods therefore means trusting that
-> the response body is small enough to fit in the available memory. Do not use
-> them for responses from untrusted or user-controlled sources. Instead, consume
-> the response body as a stream and enforce an application-specific size limit:
-> use `response.body` for fetch responses or the `body` returned by
-> `undici.request()`. For streaming decoded text, use `body.textStream()` on a
-> fetch `Request` or `Response`.
-
-Example usage:
+Here is an implementation you may use, under the same
+[license](./LICENSE) as this package:
 
 ```js
-import { request } from 'undici'
-
-const {
-  statusCode,
-  headers,
-  trailers,
-  body
-} = await request('http://localhost:3000/foo')
-
-console.log('response received', statusCode)
-console.log('headers', headers)
-console.log('data', await body.json())
-console.log('trailers', trailers)
-```
-
-_Note: Once a mixin has been called then the body cannot be reused, thus calling additional mixins on `.body`, e.g. `.body.json(); .body.text()` will result in an error `TypeError: unusable` being thrown and returned through the `Promise` rejection._
-
-Should you need to access the `body` in plain-text after using a mixin, the best practice is to use the `.text()` mixin first and then manually parse the text to the desired format.
-
-For more information about their behavior, please reference the body mixin from the [Fetch Standard](https://fetch.spec.whatwg.org/#body-mixin).
-
-## Common API Methods
-
-This section documents our most commonly used API methods. Additional APIs are documented in their own files within the [docs](./docs/) folder and are accessible via the navigation list on the left side of the docs site.
-
-For the top-level APIs below, the `url` argument supplies the request origin and
-path. Do not pass `origin` or `path` in the second `options` argument. The linked
-`Dispatcher` option types include those fields because dispatcher methods are
-lower-level APIs that do not receive a separate `url` argument.
-
-### `undici.request([url, options]): Promise`
-
-Arguments:
-
-* **url** `string | URL | UrlObject`
-* **options** [`RequestOptions`](./docs/docs/api/Dispatcher.md#parameter-requestoptions)
-  * **dispatcher** `Dispatcher` - Default: [getGlobalDispatcher](#undicigetglobaldispatcher)
-  * **method** `String` - Default: `PUT` if `options.body`, otherwise `GET`
-
-Returns a promise with the result of the `Dispatcher.request` method.
-
-Calls `options.dispatcher.request(options)`.
-
-See [Dispatcher.request](./docs/docs/api/Dispatcher.md#dispatcherrequestoptions-callback) for more details, and [request examples](./docs/examples/README.md) for examples.
-
-### `undici.stream([url, options, ]factory): Promise`
-
-Arguments:
-
-* **url** `string | URL | UrlObject`
-* **options** [`StreamOptions`](./docs/docs/api/Dispatcher.md#parameter-streamoptions)
-  * **dispatcher** `Dispatcher` - Default: [getGlobalDispatcher](#undicigetglobaldispatcher)
-  * **method** `String` - Default: `PUT` if `options.body`, otherwise `GET`
-* **factory** `Dispatcher.stream.factory`
-
-Returns a promise with the result of the `Dispatcher.stream` method.
-
-Calls `options.dispatcher.stream(options, factory)`.
-
-See [Dispatcher.stream](./docs/docs/api/Dispatcher.md#dispatcherstreamoptions-factory-callback) for more details.
-
-### `undici.pipeline([url, options, ]handler): Duplex`
-
-Arguments:
-
-* **url** `string | URL | UrlObject`
-* **options** [`PipelineOptions`](./docs/docs/api/Dispatcher.md#parameter-pipelineoptions)
-  * **dispatcher** `Dispatcher` - Default: [getGlobalDispatcher](#undicigetglobaldispatcher)
-  * **method** `String` - Default: `PUT` if `options.body`, otherwise `GET`
-* **handler** `Dispatcher.pipeline.handler`
-
-Returns: `stream.Duplex`
-
-Calls `options.dispatch.pipeline(options, handler)`.
-
-See [Dispatcher.pipeline](./docs/docs/api/Dispatcher.md#dispatcherpipelineoptions-handler) for more details.
-
-### `undici.connect([url, options]): Promise`
-
-Starts two-way communications with the requested resource using [HTTP CONNECT](https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/CONNECT).
-
-Arguments:
-
-* **url** `string | URL | UrlObject`
-* **options** [`ConnectOptions`](./docs/docs/api/Dispatcher.md#parameter-connectoptions)
-  * **dispatcher** `Dispatcher` - Default: [getGlobalDispatcher](#undicigetglobaldispatcher)
-* **callback** `(err: Error | null, data: ConnectData | null) => void` (optional)
-
-Returns a promise with the result of the `Dispatcher.connect` method.
-
-Calls `options.dispatch.connect(options)`.
-
-See [Dispatcher.connect](./docs/docs/api/Dispatcher.md#dispatcherconnectoptions-callback) for more details.
-
-### `undici.fetch(input[, init]): Promise`
-
-Implements [fetch](https://fetch.spec.whatwg.org/#fetch-method).
-
-* https://developer.mozilla.org/en-US/docs/Web/API/WindowOrWorkerGlobalScope/fetch
-* https://fetch.spec.whatwg.org/#fetch-method
-
-Basic usage example:
-
-```js
-import { fetch } from 'undici'
-
-
-const res = await fetch('https://example.com')
-const json = await res.json()
-console.log(json)
-```
-
-You can pass an optional dispatcher to `fetch` as:
-
-```js
-import { fetch, Agent } from 'undici'
-
-const res = await fetch('https://example.com', {
-  // Mocks are also supported
-  dispatcher: new Agent({
-    keepAliveTimeout: 10,
-    keepAliveMaxTimeout: 10
-  })
-})
-const json = await res.json()
-console.log(json)
-```
-
-#### `request.body`
-
-A body can be of the following types:
-
-- ArrayBuffer
-- ArrayBufferView
-- AsyncIterables
-- Blob
-- Iterables
-- String
-- URLSearchParams
-- FormData
-
-In this implementation of fetch, ```request.body``` now accepts ```Async Iterables```. It is not present in the [Fetch Standard](https://fetch.spec.whatwg.org).
-
-```js
-import { fetch } from 'undici'
-
-const data = {
-  async *[Symbol.asyncIterator]() {
-    yield 'hello'
-    yield 'world'
+// a storage-unbounded ttl cache that is not an lru-cache
+const cache = {
+  data: new Map(),
+  timers: new Map(),
+  set: (k, v, ttl) => {
+    if (cache.timers.has(k)) {
+      clearTimeout(cache.timers.get(k))
+    }
+    cache.timers.set(
+      k,
+      setTimeout(() => cache.delete(k), ttl),
+    )
+    cache.data.set(k, v)
+  },
+  get: k => cache.data.get(k),
+  has: k => cache.data.has(k),
+  delete: k => {
+    if (cache.timers.has(k)) {
+      clearTimeout(cache.timers.get(k))
+    }
+    cache.timers.delete(k)
+    return cache.data.delete(k)
+  },
+  clear: () => {
+    cache.data.clear()
+    for (const v of cache.timers.values()) {
+      clearTimeout(v)
+    }
+    cache.timers.clear()
   },
 }
-
-await fetch('https://example.com', { body: data, method: 'POST', duplex: 'half' })
 ```
 
-[FormData](https://developer.mozilla.org/en-US/docs/Web/API/FormData) besides text data and buffers can also utilize streams via [Blob](https://developer.mozilla.org/en-US/docs/Web/API/Blob) objects:
+If that isn't to your liking, check out
+[@isaacs/ttlcache](http://npm.im/@isaacs/ttlcache).
+
+## Storing Undefined Values
+
+This cache never stores undefined values, as `undefined` is used
+internally in a few places to indicate that a key is not in the
+cache.
+
+You may call `cache.set(key, undefined)`, but this is just
+an alias for `cache.delete(key)`. Note that this has the effect
+that `cache.has(key)` will return _false_ after setting it to
+undefined.
 
 ```js
-import { openAsBlob } from 'node:fs'
-
-const file = await openAsBlob('./big.csv')
-const body = new FormData()
-body.set('file', file, 'big.csv')
-
-await fetch('http://example.com', { method: 'POST', body })
+cache.set(myKey, undefined)
+cache.has(myKey) // false!
 ```
 
-#### `request.duplex`
-
-- `'half'`
-
-In this implementation of fetch, `request.duplex` must be set if `request.body` is `ReadableStream` or `Async Iterables`, however, even though the value must be set to `'half'`, it is actually a _full_ duplex. For more detail refer to the [Fetch Standard](https://fetch.spec.whatwg.org/#dom-requestinit-duplex).
-
-#### `response.body`
-
-Nodejs has two kinds of streams: [web streams](https://nodejs.org/api/webstreams.html), which follow the API of the WHATWG web standard found in browsers, and an older Node-specific [streams API](https://nodejs.org/api/stream.html). `response.body` returns a readable web stream. If you would prefer to work with a Node stream you can convert a web stream using `.fromWeb()`.
+If you need to track `undefined` values, and still note that the
+key is in the cache, an easy workaround is to use a sigil object
+of your own.
 
 ```js
-import { fetch } from 'undici'
-import { Readable } from 'node:stream'
-
-const response = await fetch('https://example.com')
-const readableWebStream = response.body
-const readableNodeStream = Readable.fromWeb(readableWebStream)
-```
-
-## Specification Compliance
-
-This section documents parts of the [HTTP/1.1](https://www.rfc-editor.org/rfc/rfc9110.html) and [Fetch Standard](https://fetch.spec.whatwg.org) that Undici does
-not support or does not fully implement.
-
-#### CORS
-
-Unlike browsers, Undici does not implement CORS (Cross-Origin Resource Sharing) checks by default. This means:
-
-- No preflight requests are automatically sent for cross-origin requests
-- No validation of `Access-Control-Allow-Origin` headers is performed
-- Requests to any origin are allowed regardless of the source
-
-This behavior is intentional for server-side environments where CORS restrictions are typically unnecessary. If your application requires CORS-like protections, you will need to implement these checks manually.
-
-#### Garbage Collection
-
-* https://fetch.spec.whatwg.org/#garbage-collection
-
-The [Fetch Standard](https://fetch.spec.whatwg.org) allows users to skip consuming the response body by relying on
-[garbage collection](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Memory_Management#garbage_collection) to release connection resources.
-
-Garbage collection in Node is less aggressive and deterministic
-(due to the lack of clear idle periods that browsers have through the rendering refresh rate)
-which means that leaving the release of connection resources to the garbage collector can lead
-to excessive connection usage, reduced performance (due to less connection re-use), and even
-stalls or deadlocks when running out of connections.
-Therefore, __it is important to always either consume or cancel the response body anyway__.
-
-```js
-// Do
-const { body, headers } = await fetch(url);
-for await (const chunk of body) {
-  // force consumption of body
+import { LRUCache } from 'lru-cache'
+const undefinedValue = Symbol('undefined')
+const cache = new LRUCache(...)
+const mySet = (key, value) =>
+  cache.set(key, value === undefined ? undefinedValue : value)
+const myGet = (key, value) => {
+  const v = cache.get(key)
+  return v === undefinedValue ? undefined : v
 }
-
-// Do not
-const { headers } = await fetch(url);
 ```
 
-However, if you want to get only headers, it might be better to use `HEAD` request method. Usage of this method will obviate the need for consumption or cancelling of the response body. See [MDN - HTTP - HTTP request methods - HEAD](https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/HEAD) for more details.
+## Tracing and Observability
+
+Most methods can accept a `status` option, which is an
+[`LRUCache.Status`](https://isaacs.github.io/node-lru-cache/interfaces/LRUCache.LRUCache.Status.html)
+object that will be decorated along the operation with
+indications about what was done and why.
+
+Additionally, this library is instrumented using the
+[`node:diagnostics_channel`](https://nodejs.org/api/diagnostics_channel.html)
+module on Node and other platforms that support it. In order to
+get diagnostics metrics, listen on the
+`channel('lru-cache:metrics')`. To get Tracing Channel traces,
+subscribe to the `tracingChannel('lru-cache')`. The
+[`LRUCache.Status`](https://isaacs.github.io/node-lru-cache/interfaces/LRUCache.LRUCache.Status.html)
+objects will be provided as the message context to those channel
+listeners.
+
+For example, you could do the following to get comprehensive
+information about every LRUCache instance in your application:
+
+```ts
+import { tracingChannel, subscribe } from 'node:diagnostics_channel'
+
+subscribe('lru-cache:metrics', (message, name) => {
+  // name will always be 'lru-cache:metrics'
+  // message will be the LRUCache.Status object for whatever
+  // synchronous operation was performed.
+  console.error('LRUCache Metrics', message)
+})
+
+tracingChannel('lru-cache').subscribe({
+  start: status => {
+    // a traced operation is starting
+  },
+  asyncStart: status => {
+    // an async traced operation is starting
+  },
+  asyncEnd: status => {
+    // an async traced operation is ending
+  }
+  error: status => {
+    // a traced operation failed
+  },
+  end: status => {
+    // a traced operation is complete
+  },
+})
+```
+
+The async `cache.fetch()` and `cache.forceFetch` methods are
+covered by `tracingChannels`. All the other operations are
+covered by the `lru-cache:metrics` channel, because they are
+strictly synchronous, and thus don't have an asynchronous
+lifecycle to track.
+
+Note that using `status` objects or using
+`node:diagnostics_channel` listeners _will_ impose a modest
+performance penalty. Creating data objects is not ever free; do
+not believe anyone who tells you otherwise. But it is as small as
+possible.
+
+### Platform Compatibility Caveat
+
+Not all platforms support the `node:diagnostics_channel` module.
+Currently, this is only available in Node, Bun, and Deno, and
+some edge computing platforms that provide a Node compatibility
+layer.
+
+To work around this, if you are loading in a non-Node
+environment, the package.json exports will direct your module
+loader to pull in a version that starts out with a dummy
+implementation, then does a conditional dynamic `import` of the
+`node:diagnostics_channel` module, and then swaps out those
+dummy objects with the real thing if it succeeds. This means that
+cache metrics and tracing channels started in the first load-time
+tick of your application will _not_ be covered, except in
+environments that load using the `require` import
+condition, or both the `node` and `esm` import conditions
+together.
+
+Top-level await _could_ be used to remove this caveat, but that
+feature is dead on arrival, unfortunately. See
+[#397](https://github.com/isaacs/node-lru-cache/issues/397) and
+[#398](https://github.com/isaacs/node-lru-cache/issues/398) for
+more details.
+
+## Performance
+
+As of April 2026, version 11 of this library is one of the most
+performant LRU cache implementations in JavaScript.
+
+Benchmarks can be extremely difficult to get right. In
+particular, the performance of set/get/delete operations on
+objects will vary _wildly_ depending on the type of key used. V8
+is highly optimized for objects with keys that are short strings,
+especially integer numeric strings. Thus any benchmark which
+tests _solely_ using numbers as keys will tend to find that an
+object-based approach performs the best.
+
+Note that coercing _anything_ to strings to use as object keys is
+unsafe, unless you can be 100% certain that no other type of
+value will be used. For example:
 
 ```js
-const headers = await fetch(url, { method: 'HEAD' })
-  .then(res => res.headers)
+const myCache = {}
+const set = (k, v) => (myCache[k] = v)
+const get = k => myCache[k]
+
+set({}, 'please hang onto this for me')
+set('[object Object]', 'oopsie')
 ```
 
-Note that consuming the response body is _mandatory_ for `request`:
+Also beware of "Just So" stories regarding performance. Garbage
+collection of large (especially: deep) object graphs can be
+incredibly costly, with several "tipping points" where it
+increases exponentially. As a result, putting that off until
+later can make it much worse, and less predictable. If a library
+performs well, but only in a scenario where the object graph is
+kept shallow, then that won't help you if you are using large
+objects as keys.
 
-```js
-// Do
-const { body, headers } = await request(url);
-await body.dump(); // force consumption of body
+In general, when attempting to use a library to improve
+performance (such as a cache like this one), it's best to choose
+an option that will perform well in the sorts of scenarios where
+you'll actually use it.
 
-// Do not
-const { headers } = await request(url);
+This library is optimized for repeated gets and minimizing
+eviction time, since that is the expected need of a LRU. Set
+operations are somewhat slower on average than a few other
+options, in part because of that optimization. It is assumed
+that you'll be caching some costly operation, ideally as rarely
+as possible, so optimizing set over get would be unwise.
+
+If performance matters to you:
+
+1. If it's at all possible to use small integer values as keys,
+   and you can guarantee that no other types of values will be
+   used as keys, then do that, and use a cache such as
+   [lru-fast](https://npmjs.com/package/lru-fast), or
+   [mnemonist's
+   LRUCache](https://yomguithereal.github.io/mnemonist/lru-cache)
+   which uses an Object as its data store.
+
+2. Failing that, if you can use short non-numeric strings (ie,
+   less than 256 characters) as your keys, and you do not need
+   any of the other features of this library, use [mnemonist's
+   LRUCache](https://yomguithereal.github.io/mnemonist/lru-cache).
+
+3. If the types of your keys will be anything else, especially
+   long strings, strings that look like floats, objects, or some
+   mix of types, or if you aren't sure, then this library will
+   work well for you.
+
+   If you do not need the features that this library provides
+   (like asynchronous fetching, a variety of TTL staleness
+   options, and so on), then [mnemonist's
+   LRUMap](https://yomguithereal.github.io/mnemonist/lru-map) is
+   also a very good option, and just slightly faster than this
+   module (since it does considerably less).
+
+4. Do not use a `dispose` function, size tracking, or especially
+   ttl behavior or observability features, unless absolutely
+   needed. These features are convenient, and necessary in some
+   use cases, and every attempt has been made to make the
+   performance impact minimal, but it isn't nothing.
+
+## Testing
+
+When writing tests that involve TTL-related functionality, note
+that this module creates an internal reference to the global
+`performance` or `Date` objects at import time. If you import it
+statically at the top level, those references cannot be mocked or
+overridden in your test environment.
+
+To avoid this, dynamically import the package within your tests
+so that the references are captured after your mocks are applied.
+For example:
+
+```ts
+// ❌ Not recommended
+import { LRUCache } from 'lru-cache'
+// mocking timers, e.g. jest.useFakeTimers()
+
+// ✅ Recommended for TTL tests
+// mocking timers, e.g. jest.useFakeTimers()
+const { LRUCache } = await import('lru-cache')
 ```
 
-#### Forbidden and Safelisted Header Names
+This ensures that your mocked timers or time sources are
+respected when testing TTL behavior.
 
-* https://fetch.spec.whatwg.org/#cors-safelisted-response-header-name
-* https://fetch.spec.whatwg.org/#forbidden-header-name
-* https://fetch.spec.whatwg.org/#forbidden-response-header-name
-* https://github.com/wintercg/fetch/issues/6
+Additionally, you can pass in a `perf` option when creating your
+LRUCache instance. This option accepts any object with a `now`
+method that returns a number.
 
-The [Fetch Standard](https://fetch.spec.whatwg.org) requires implementations to exclude certain headers from requests and responses. In browser environments, some headers are forbidden so the user agent remains in full control over them. In Undici, these constraints are removed to give more control to the user.
+For example, this would be a very bare-bones time-mocking system
+you could use in your tests, without any particular test
+framework:
 
-#### Content-Encoding
+```ts
+import { LRUCache } from 'lru-cache'
 
-* https://www.rfc-editor.org/rfc/rfc9110#field.content-encoding
+let myClockTime = 0
 
-Undici limits the number of `Content-Encoding` layers in a response to **5** to prevent resource exhaustion attacks. If a server responds with more than 5 content-encodings (e.g., `Content-Encoding: gzip, gzip, gzip, gzip, gzip, gzip`), the fetch will be rejected with an error. This limit matches the approach taken by [curl](https://curl.se/docs/CVE-2022-32206.html) and [urllib3](https://github.com/advisories/GHSA-gm62-xv2j-4rw9).
+const cache = new LRUCache<string>({
+  max: 10,
+  ttl: 1000,
+  perf: {
+    now: () => myClockTime,
+  },
+})
 
-#### `undici.upgrade([url, options]): Promise`
-
-Upgrade to a different protocol. See [MDN - HTTP - Protocol upgrade mechanism](https://developer.mozilla.org/en-US/docs/Web/HTTP/Protocol_upgrade_mechanism) for more details.
-
-Arguments:
-
-* **url** `string | URL | UrlObject`
-* **options** [`UpgradeOptions`](./docs/docs/api/Dispatcher.md#parameter-upgradeoptions)
-  * **dispatcher** `Dispatcher` - Default: [getGlobalDispatcher](#undicigetglobaldispatcher)
-* **callback** `(error: Error | null, data: UpgradeData) => void` (optional)
-
-Returns a promise with the result of the `Dispatcher.upgrade` method.
-
-Calls `options.dispatcher.upgrade(options)`.
-
-See [Dispatcher.upgrade](./docs/docs/api/Dispatcher.md#dispatcherupgradeoptions-callback) for more details.
-
-### `undici.setGlobalDispatcher(dispatcher)`
-
-* dispatcher `Dispatcher`
-
-Sets the global dispatcher used by Common API Methods. Global dispatcher is shared among compatible undici modules,
-including undici that is bundled internally with node.js.
-
-Undici stores this dispatcher under `Symbol.for('undici.globalDispatcher.2')`.
-
-`setGlobalDispatcher()` also mirrors the configured dispatcher to
-`Symbol.for('undici.globalDispatcher.1')` using `Dispatcher1Wrapper`, so Node.js built-in `fetch`
-can keep using the legacy handler contract while Undici uses the new handler API.
-
-### `undici.getGlobalDispatcher()`
-
-Gets the global dispatcher used by Common API Methods.
-
-Returns: `Dispatcher`
-
-### `undici.setGlobalOrigin(origin)`
-
-* origin `string | URL | undefined`
-
-Sets the global origin used in `fetch`.
-
-If `undefined` is passed, the global origin will be reset. This will cause `Response.redirect`, `new Request()`, and `fetch` to throw an error when a relative path is passed.
-
-```js
-setGlobalOrigin('http://localhost:3000')
-
-const response = await fetch('/api/ping')
-
-console.log(response.url) // http://localhost:3000/api/ping
+// run tests, updating myClockTime as needed
 ```
 
-### `undici.getGlobalOrigin()`
+## Breaking Changes in Version 7
 
-Gets the global origin used in `fetch`.
+This library changed to a different algorithm and internal data
+structure in version 7, yielding significantly better
+performance, albeit with some subtle changes as a result.
 
-Returns: `URL`
+If you were relying on the internals of LRUCache in version 6 or
+before, it probably will not work in version 7 and above.
 
-### `UrlObject`
+## Breaking Changes in Version 8
 
-* **port** `string | number` (optional)
-* **path** `string` (optional)
-* **pathname** `string` (optional)
-* **hostname** `string` (optional)
-* **origin** `string` (optional)
-* **protocol** `string` (optional)
-* **search** `string` (optional)
+- The `fetchContext` option was renamed to `context`, and may no
+  longer be set on the cache instance itself.
+- Rewritten in TypeScript, so pretty much all the types moved
+  around a lot.
+- The AbortController/AbortSignal polyfill was removed. For this
+  reason, **Node version 16.14.0 or higher is now required**.
+- Internal properties were moved to actual private class
+  properties.
+- Keys and values must not be `null` or `undefined`.
+- Minified export available at `'lru-cache/min'`, for both CJS
+  and MJS builds.
 
-#### Expect
+## Breaking Changes in Version 9
 
-Undici does not support the `Expect` request header field. The request
-body is  always immediately sent and the `100 Continue` response will be
-ignored.
+- Named export only, no default export.
+- AbortController polyfill returned, albeit with a warning when
+  used.
 
-Refs: https://tools.ietf.org/html/rfc7231#section-5.1.1
+## Breaking Changes in Version 10
 
-#### Pipelining
+- `cache.fetch()` return type is now `Promise<V | undefined>`
+  instead of `Promise<V | void>`. This is an irrelevant change
+  practically speaking, but can require changes for TypeScript
+  users.
 
-Undici will only use pipelining if configured with a `pipelining` factor
-greater than `1`. Only enable pipelining when the remote server is trusted.
-Also it is important to pass `blocking: false` to the request options to
-properly pipeline requests.
-
-Undici always assumes that connections are persistent and will immediately
-pipeline requests, without checking whether the connection is persistent.
-Hence, automatic fallback to HTTP/1.0 or HTTP/1.1 without pipelining is
-not supported.
-
-Undici will immediately pipeline when retrying requests after a failed
-connection. However, Undici will not retry the first remaining requests in
-the prior pipeline and instead error the corresponding callback/promise/stream.
-
-Undici will abort all running requests in the pipeline when any of them are
-aborted.
-
-* Refs: https://tools.ietf.org/html/rfc2616#section-8.1.2.2
-* Refs: https://tools.ietf.org/html/rfc7230#section-6.3.2
-
-#### Manual Redirect
-
-Since it is not possible to manually follow an HTTP redirect on the server-side,
-Undici returns the actual response instead of an `opaqueredirect` filtered one
-when invoked with a `manual` redirect. This aligns `fetch()` with the other
-implementations in Deno and Cloudflare Workers.
-
-Refs: https://fetch.spec.whatwg.org/#atomic-http-redirect-handling
-
-### Workarounds
-
-#### Network address family autoselection.
-
-If you experience problem when connecting to a remote server that is resolved by your DNS servers to a IPv6 (AAAA record)
-first, there are chances that your local router or ISP might have problem connecting to IPv6 networks. In that case
-undici will throw an error with code `UND_ERR_CONNECT_TIMEOUT`.
-
-If the target server resolves to both a IPv6 and IPv4 (A records) address and you are using a compatible Node version
-(18.3.0 and above), you can fix the problem by providing the `autoSelectFamily` option (support by both `undici.request`
-and `undici.Agent`) which will enable the family autoselection algorithm when establishing the connection.
-
-## Collaborators
-
-* [__Daniele Belardi__](https://github.com/dnlup), <https://www.npmjs.com/~dnlup>
-* [__Ethan Arrowood__](https://github.com/ethan-arrowood), <https://www.npmjs.com/~ethan_arrowood>
-* [__Matteo Collina__](https://github.com/mcollina), <https://www.npmjs.com/~matteo.collina>
-* [__Matthew Aitken__](https://github.com/KhafraDev), <https://www.npmjs.com/~khaf>
-* [__Robert Nagy__](https://github.com/ronag), <https://www.npmjs.com/~ronag>
-* [__Szymon Marczak__](https://github.com/szmarczak), <https://www.npmjs.com/~szmarczak>
-
-## Past Collaborators
-* [__Tomas Della Vedova__](https://github.com/delvedor), <https://www.npmjs.com/~delvedor>
-
-### Releasers
-
-* [__Ethan Arrowood__](https://github.com/ethan-arrowood), <https://www.npmjs.com/~ethan_arrowood>
-* [__Matteo Collina__](https://github.com/mcollina), <https://www.npmjs.com/~matteo.collina>
-* [__Robert Nagy__](https://github.com/ronag), <https://www.npmjs.com/~ronag>
-* [__Matthew Aitken__](https://github.com/KhafraDev), <https://www.npmjs.com/~khaf>
-
-## Long Term Support
-
-Undici aligns with the Node.js LTS schedule. The following table shows the supported versions:
-
-| Undici Version | Bundled in Node.js | Node.js Versions Supported | End of Life |
-|----------------|--------------------|----------------------------|-------------|
-| 5.x            | 18.x               | ≥14.0 (tested: 14, 16, 18) | 2024-04-30  |
-| 6.x            | 20.x, 22.x         | ≥18.17 (tested: 18, 20, 21, 22) | 2027-04-30  |
-| 7.x            | 24.x               | ≥20.18.1 (tested: 20, 22, 24) | 2028-04-30  |
-| 8.x            | 26.x               | ≥22.19.0 (tested: 22, 24, 26) | 2029-04-30  |
-
-## License
-
-MIT
+For more info, see the [change log](CHANGELOG.md).

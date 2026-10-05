@@ -1,9 +1,12 @@
+"use strict";
 /**
  * @module LRUCache
  */
-import { metrics, tracing } from './diagnostics-channel.js';
-import { defaultPerf } from './perf.js';
-const hasSubscribers = () => metrics.hasSubscribers || tracing.hasSubscribers;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.LRUCache = void 0;
+const diagnostics_channel_js_1 = require("./diagnostics-channel.js");
+const perf_js_1 = require("./perf.js");
+const hasSubscribers = () => diagnostics_channel_js_1.metrics.hasSubscribers || diagnostics_channel_js_1.tracing.hasSubscribers;
 const warned = new Set();
 /* c8 ignore start */
 const PROCESS = (typeof process === 'object' && !!process ?
@@ -91,7 +94,7 @@ class Stack {
  *
  * Changing any of these will alter the defaults for subsequent method calls.
  */
-export class LRUCache {
+class LRUCache {
     // options that cannot be changed without disaster
     #max;
     #maxSize;
@@ -286,7 +289,7 @@ export class LRUCache {
                 throw new TypeError('perf option must have a now() method if specified');
             }
         }
-        this.#perf = perf ?? defaultPerf;
+        this.#perf = perf ?? perf_js_1.defaultPerf;
         if (max !== 0 && !isPosInt(max)) {
             throw new TypeError('max option must be a nonnegative integer');
         }
@@ -883,7 +886,7 @@ export class LRUCache {
      * `cache.delete(key)`. `undefined` is never stored in the cache.
      */
     set(k, v, setOptions = {}) {
-        const { status = metrics.hasSubscribers ? {} : undefined } = setOptions;
+        const { status = diagnostics_channel_js_1.metrics.hasSubscribers ? {} : undefined } = setOptions;
         setOptions.status = status;
         if (status) {
             status.op = 'set';
@@ -893,8 +896,8 @@ export class LRUCache {
             status.cache = this;
         }
         const result = this.#set(k, v, setOptions);
-        if (status && metrics.hasSubscribers) {
-            metrics.publish(status);
+        if (status && diagnostics_channel_js_1.metrics.hasSubscribers) {
+            diagnostics_channel_js_1.metrics.publish(status);
         }
         return result;
     }
@@ -1109,7 +1112,7 @@ export class LRUCache {
      * {@link LRUCache.OptionsBase.updateAgeOnHas} is set.
      */
     has(k, hasOptions = {}) {
-        const { status = metrics.hasSubscribers ? {} : undefined } = hasOptions;
+        const { status = diagnostics_channel_js_1.metrics.hasSubscribers ? {} : undefined } = hasOptions;
         hasOptions.status = status;
         if (status) {
             status.op = 'has';
@@ -1117,8 +1120,8 @@ export class LRUCache {
             status.cache = this;
         }
         const result = this.#has(k, hasOptions);
-        if (metrics.hasSubscribers)
-            metrics.publish(status);
+        if (diagnostics_channel_js_1.metrics.hasSubscribers)
+            diagnostics_channel_js_1.metrics.publish(status);
         return result;
     }
     #has(k, hasOptions = {}) {
@@ -1166,8 +1169,8 @@ export class LRUCache {
         }
         peekOptions.status = status;
         const result = this.#peek(k, peekOptions);
-        if (metrics.hasSubscribers) {
-            metrics.publish(status);
+        if (diagnostics_channel_js_1.metrics.hasSubscribers) {
+            diagnostics_channel_js_1.metrics.publish(status);
         }
         return result;
     }
@@ -1342,7 +1345,7 @@ export class LRUCache {
             b.__abortController instanceof AbortController);
     }
     fetch(k, fetchOptions = {}) {
-        const ths = tracing.hasSubscribers;
+        const ths = diagnostics_channel_js_1.tracing.hasSubscribers;
         const { status = hasSubscribers() ? {} : undefined } = fetchOptions;
         fetchOptions.status = status;
         if (status && fetchOptions.context) {
@@ -1351,7 +1354,7 @@ export class LRUCache {
         const p = this.#fetch(k, fetchOptions);
         if (status && ths) {
             status.trace = true;
-            tracing.tracePromise(() => p, status).catch(() => { });
+            diagnostics_channel_js_1.tracing.tracePromise(() => p, status).catch(() => { });
         }
         return p;
     }
@@ -1443,7 +1446,7 @@ export class LRUCache {
         }
     }
     forceFetch(k, fetchOptions = {}) {
-        const ths = tracing.hasSubscribers;
+        const ths = diagnostics_channel_js_1.tracing.hasSubscribers;
         const { status = hasSubscribers() ? {} : undefined } = fetchOptions;
         fetchOptions.status = status;
         if (status && fetchOptions.context) {
@@ -1452,7 +1455,7 @@ export class LRUCache {
         const p = this.#forceFetch(k, fetchOptions);
         if (status && ths) {
             status.trace = true;
-            tracing.tracePromise(() => p, status).catch(() => { });
+            diagnostics_channel_js_1.tracing.tracePromise(() => p, status).catch(() => { });
         }
         return p;
     }
@@ -1463,7 +1466,7 @@ export class LRUCache {
         return v;
     }
     memo(k, memoOptions = {}) {
-        const { status = metrics.hasSubscribers ? {} : undefined } = memoOptions;
+        const { status = diagnostics_channel_js_1.metrics.hasSubscribers ? {} : undefined } = memoOptions;
         memoOptions.status = status;
         if (status) {
             status.op = 'memo';
@@ -1476,8 +1479,8 @@ export class LRUCache {
         const result = this.#memo(k, memoOptions);
         if (status)
             status.value = result;
-        if (metrics.hasSubscribers)
-            metrics.publish(status);
+        if (diagnostics_channel_js_1.metrics.hasSubscribers)
+            diagnostics_channel_js_1.metrics.publish(status);
         return result;
     }
     #memo(k, memoOptions = {}) {
@@ -1513,7 +1516,7 @@ export class LRUCache {
      * If the key is not found, get() will return `undefined`.
      */
     get(k, getOptions = {}) {
-        const { status = metrics.hasSubscribers ? {} : undefined } = getOptions;
+        const { status = diagnostics_channel_js_1.metrics.hasSubscribers ? {} : undefined } = getOptions;
         getOptions.status = status;
         if (status) {
             status.op = 'get';
@@ -1524,8 +1527,8 @@ export class LRUCache {
         if (status) {
             if (result !== undefined)
                 status.value = result;
-            if (metrics.hasSubscribers)
-                metrics.publish(status);
+            if (diagnostics_channel_js_1.metrics.hasSubscribers)
+                diagnostics_channel_js_1.metrics.publish(status);
         }
         return result;
     }
@@ -1612,8 +1615,8 @@ export class LRUCache {
         return this.#delete(k, 'delete');
     }
     #delete(k, reason) {
-        if (metrics.hasSubscribers) {
-            metrics.publish({
+        if (diagnostics_channel_js_1.metrics.hasSubscribers) {
+            diagnostics_channel_js_1.metrics.publish({
                 op: 'delete',
                 delete: reason,
                 key: k,
@@ -1726,4 +1729,5 @@ export class LRUCache {
         }
     }
 }
+exports.LRUCache = LRUCache;
 //# sourceMappingURL=index.js.map
