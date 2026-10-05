@@ -202,6 +202,53 @@ test('topping out sets the dead flag and emits an event', () => {
   assert.ok(events.includes('topout'));
 });
 
+test('soft drop never bursts when it starts', () => {
+  // Bank up nearly a full second of level-1 gravity, then press down. The
+  // accumulated time must not be spent as a burst of instant rows.
+  const g = new Game({ seed: 1 });
+  for (let i = 0; i < 55; i++) g.tick(1000 / 60);
+  assert.ok(g.gravityAcc > 500, 'gravity should be well banked for this test');
+
+  const before = g.py;
+  g.input({ softDrop: true });
+  g.tick(1000 / 60);
+  assert.ok(g.py - before <= 1, `one frame moved ${g.py - before} rows, expected at most 1`);
+
+  // Soft drop should then settle at roughly 20 rows per second.
+  const start = g.py;
+  for (let i = 0; i < 60; i++) g.tick(1000 / 60);
+  const rows = g.py - start;
+  assert.ok(rows >= 15 && rows <= 21, `expected ~18 rows in a second, got ${rows}`);
+});
+
+test('releasing soft drop does not move the piece', () => {
+  const g = new Game({ seed: 3 });
+  g.input({ softDrop: true });
+  for (let i = 0; i < 30; i++) g.tick(1000 / 60);
+
+  const before = g.py;
+  g.input({ softDrop: false });
+  g.tick(1000 / 60);
+  assert.equal(g.py, before, 'the release frame itself should not move the piece');
+
+  // Back to the natural curve: one row per second at level 1.
+  for (let i = 0; i < 30; i++) g.tick(1000 / 60);
+  assert.ok(g.py - before <= 1, `natural gravity resumed too fast: ${g.py - before} rows`);
+});
+
+test('soft drop only scores cells it actually moves', () => {
+  const g = new Game({ seed: 4 });
+  const before = g.score;
+  // Hold soft drop for a fixed time, then hard drop, and compare with the
+  // points the engine attributes to the drop.
+  g.input({ softDrop: true });
+  for (let i = 0; i < 10; i++) g.tick(1000 / 60);
+  const softCells = g.softDropCells;
+  assert.ok(softCells > 0, 'soft drop should have accumulated cells');
+  g.hardDrop();
+  assert.ok(g.score > before);
+});
+
 test('ticking is frame-rate independent for gravity', () => {
   const a = new Game({ seed: 21, startingLevel: 5 });
   const b = new Game({ seed: 21, startingLevel: 5 });

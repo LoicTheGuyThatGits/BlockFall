@@ -170,7 +170,14 @@ export class Game {
     if (input.dx) acted = this.move(input.dx) || acted;
 
     if (input.softDrop !== undefined) {
-      this.softDropping = !!input.softDrop && !this.dead;
+      const want = !!input.softDrop && !this.dead;
+      if (want !== this.softDropping) {
+        this.softDropping = want;
+        // Soft drop divides the gravity interval by 20. Any time already
+        // banked against the natural curve would be spent as a burst of
+        // instant rows, so discard it when the interval changes.
+        this.gravityAcc = 0;
+      }
     }
 
     if (input.hardDrop) acted = this.hardDrop() || acted;
