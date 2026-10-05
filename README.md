@@ -63,24 +63,64 @@ Touch controls appear automatically on phones and tablets.
 - After a match, vote for a rematch and it restarts once everyone has voted.
 - Empty rooms are cleaned up after a minute.
 
+## Deploying for free
+
+The short version: **push to GitHub, then create a Render Blueprint.** It is
+three clicks, needs no credit card, and supports WebSockets on the free tier.
+Full steps are in the first section below.
+
+The one hard requirement: multiplayer needs a **Web Service**, not a static
+site. Static hosts (GitHub Pages, Netlify, Vercel) serve files only and cannot
+hold WebSocket connections, so they can host the client but never the server.
+
+| Host | Free tier | Good for |
+| --- | --- | --- |
+| **Render** | Web service, 750 h/mo, sleeps after 15 min idle | Best default. Blueprint included. |
+| **Koyeb** | One web service, scales to zero, wakes in 1&ndash;5s | Faster wake-up; needs a card since Feb 2026. |
+| **Railway** | $1/month credit | Effectively a trial, not free long-term. |
+| **Fly.io** | None for new accounts | Not an option. |
+
+GitHub Pages + a Render server is a good two-part split if you want the client
+on your own domain-ish URL, but it adds a step for no functional gain.
+
 ## Deploying
 
 The client is plain static files and the server is one small Node process, so
 there are two useful setups.
 
-### Option 1: one container for everything
+### Option 1: Render, free tier (recommended)
 
-Deploy the included `Dockerfile` anywhere that runs containers (Render, Fly.io,
-Railway, Cloud Run, your own box).
+Push the repo to GitHub, then:
+
+1. Go to <https://dashboard.render.com> and sign up.
+2. **New &rarr; Blueprint**, pick your repo. Render reads `render.yaml`, so
+   there is nothing else to configure.
+3. Wait for the first deploy, then open the `https://blockfall.onrender.com`
+   URL it gives you.
+
+That's it. No card, no build command to write. The blueprint in `render.yaml`
+already sets the runtime, health check and env vars.
+
+Two things to expect on the free tier:
+
+- **The server sleeps after 15 minutes** without traffic and takes about a
+  minute to wake. The first visitor after a nap sees a loading page. The client
+  reconnects on its own, and if the room was lost to the restart it says so
+  instead of hanging.
+- **750 instance hours per month**, shared across the workspace. One always-on
+  service fits comfortably; rooms and matches live in memory, so nothing
+  persists across a restart (which is fine for a game, not for user accounts).
+
+If you'd rather not sleep, the $7/mo Starter plan stays awake.
+
+### Option 1b: any other Docker host
+
+Same image, anywhere that runs containers:
 
 ```bash
 docker build -t blockfall .
 docker run -p 8080:8080 blockfall
 ```
-
-On Render the `render.yaml` blueprint is already set up:
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/YOUR_USER/blockfall)
 
 ### Option 2: static client on GitHub Pages, server elsewhere
 

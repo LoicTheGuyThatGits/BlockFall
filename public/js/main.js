@@ -83,6 +83,20 @@ win.requestAnimationFrame(loop);
  * Browsers never need this, but it lets the test suite boot many clients in a
  * single process without leaking loops.
  */
+/**
+ * Read-only view of internal state, for the browser tests and for debugging
+ * in the console. Not used by the game itself.
+ */
+export function debug() {
+  return {
+    state,
+    get net() {
+      return state.net;
+    },
+    renderer,
+  };
+}
+
 export function teardown() {
   state.disposed = true; // stops the animation loop from rescheduling
   stopGame();
@@ -271,11 +285,27 @@ function connectAnd(t, payload) {
   state.net?.send({ t, ...payload });
 }
 
+/**
+ * Get back into the room we were dropped from.
+ *
+ * Rooms live in server memory, so if the host slept or restarted the code may
+ * be gone; in that case fall back to the menu rather than sitting on a
+ * loading screen.
+ */
+function rejoinRoom() {
+  const code = state.roomCode;
+  if (!code) return;
+  connectAnd(MSG.JOIN, { name: state.name, color: state.color, code, settings: state.settings });
+}
+
 function wireNet(net) {
   net.on('status', ({ state: s }) => {
     const banner = $('#connBanner');
     if (s === 'connected') {
       banner.classList.add('hidden');
+      // If we were dropped from a room, try to get straight back in. Free
+      // hosts sleep when idle, so this path is not hypothetical.
+      if (state.roomCode) rejoinRoom();
     } else {
       banner.classList.remove('hidden');
       $('#connText').textContent = s === 'reconnecting' ? 'Reconnecting...' : 'Disconnected';
@@ -329,7 +359,17 @@ function wireNet(net) {
 
   net.on(MSG.CHAT, (msg) => addChat(msg));
 
-  net.on(MSG.ERROR, (msg) => toast(msg.message || 'Error'));
+  net.on(MSG.ERROR, (msg) => {
+  toast(msg.message || 'Error');
+  // A room that no longer exists cannot be rejoined; go back to the menu.
+  if (/No room called/.test(msg.message || '') && state.roomCode) {
+    state.roomCode = null;
+    state.room = null;
+    stopGame();
+    showScreen('menu');
+    toast('That room is gone. Create a new one to keep playing.');
+  }
+});
 
   net.on(MSG.LEFT, () => {
     state.room = null;

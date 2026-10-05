@@ -164,6 +164,8 @@ async function loadClient() {
     dom,
     window,
     consoleErrors,
+    /** The client's own module namespace, for poking at internal state. */
+    module: mod,
     /**
      * Tear down: stop the client's loops and socket, then put the globals back
      * so the next test starts clean.
@@ -489,6 +491,34 @@ test('leaving a room returns to the menu', async () => {
   doc.querySelector('#lobbyBack').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 400));
   assert.equal(doc.querySelector('#menu').classList.contains('active'), true, 'back at the menu');
+  client.close();
+});
+
+test('a dropped connection returns the player to their room', async () => {
+  const client = await loadClient();
+  const { window } = client;
+  const doc = window.document;
+
+  doc.querySelector('#btnCreate').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 900));
+  const code = doc.querySelector('#lobbyCode').textContent;
+  assert.match(code, /^[A-Z0-9]{5}$/);
+
+  // Simulate the host sleeping: drop the socket and let Net reconnect.
+  client.module.debug().net.ws.close();
+  await new Promise((r) => setTimeout(r, 2000));
+
+  // Either we are back in the same room, or the server said it was gone and
+  // we were returned to the menu. Both are correct outcomes; silently hanging
+  // on a dead room is not.
+  const inLobby = doc.querySelector('#lobby').classList.contains('active');
+  const inMenu = doc.querySelector('#menu').classList.contains('active');
+  assert.ok(inLobby || inMenu, 'the client lands somewhere sensible after a disconnect');
+  if (inLobby) {
+    assert.equal(doc.querySelector('#lobbyCode').textContent, code, 'same room code');
+  } else {
+    assert.match(doc.querySelector('#toasts').textContent, /room is gone/i);
+  }
   client.close();
 });
 
