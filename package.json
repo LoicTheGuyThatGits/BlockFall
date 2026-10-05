@@ -1,0 +1,25 @@
+{
+  "name": "blockfall",
+  "version": "1.0.0",
+  "description": "A hostable online multiplayer Tetris with rooms. Static client + authoritative WebSocket server.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test --test-force-exit test/*.test.js",
+    "test:unit": "node --test test/game.test.js test/lobby.test.js",
+    "test:e2e": "node --test --test-force-exit test/e2e.test.js",
+    "test:client": "node --test --test-force-exit test/client.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "jsdom": "^30.1.2"
+  }
+}

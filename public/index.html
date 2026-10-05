@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Blockfall &mdash; online Tetris</title>
+<meta name="description" content="Play Tetris alone or against friends in rooms. Hosted online with real multiplayer.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ================================================================ MENU -->
+  <section id="menu" class="screen active">
+    <header class="logo-wrap">
+      <svg class="logo" viewBox="0 0 240 60" aria-label="Blockfall">
+        <g class="logo-blocks">
+          <rect x="2"  y="30" width="14" height="14" rx="2" fill="#22d3ee"/>
+          <rect x="20" y="30" width="14" height="14" rx="2" fill="#22d3ee"/>
+          <rect x="38" y="30" width="14" height="14" rx="2" fill="#22d3ee"/>
+          <rect x="56" y="30" width="14" height="14" rx="2" fill="#22d3ee"/>
+          <rect x="38" y="12" width="14" height="14" rx="2" fill="#22d3ee" opacity=".55"/>
+        </g>
+        <text x="84" y="46" class="logo-text">BLOCKFALL</text>
+      </svg>
+      <p class="tagline">Stack. Clear. Outlast.</p>
+    </header>
+
+    <div class="panel name-panel">
+      <label class="field">
+        <span>Your name</span>
+        <input id="nameInput" type="text" maxlength="16" placeholder="Player" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="field">
+        <span>Piece colour</span>
+        <div id="colorPicker" class="color-picker" role="radiogroup" aria-label="Piece colour"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Play</h2>
+      <div class="btn-grid">
+        <button id="btnSolo" class="btn btn-primary btn-lg">Solo</button>
+        <button id="btnQuick" class="btn btn-accent btn-lg">Quick play</button>
+      </div>
+      <div class="join-row">
+        <input id="codeInput" type="text" maxlength="6" placeholder="ROOM CODE" autocomplete="off" spellcheck="false">
+        <button id="btnJoin" class="btn">Join</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Rooms <span id="roomCount" class="badge">0</span></h2>
+      <div id="roomList" class="room-list">
+        <p class="empty">No open rooms. Create one below.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>New room</h2>
+      <div class="mode-grid" id="modePicker">
+        <button class="mode-btn selected" data-mode="marathon">
+          <strong>Marathon</strong>
+          <small>Clear as many lines as you can.</small>
+        </button>
+        <button class="mode-btn" data-mode="sprint">
+          <strong>Sprint</strong>
+          <small>Race to 40 lines. Fastest wins.</small>
+        </button>
+        <button class="mode-btn" data-mode="versus">
+          <strong>Versus</strong>
+          <small>Send garbage. Last one standing.</small>
+        </button>
+      </div>
+      <div class="settings-grid">
+        <label class="field">
+          <span>Start level <output id="levelOut">1</output></span>
+          <input id="startLevel" type="range" min="1" max="15" value="1">
+        </label>
+        <label class="field">
+          <span>Sprint goal <output id="goalOut">40</output></span>
+          <input id="linesToWin" type="range" min="10" max="100" step="5" value="40">
+        </label>
+        <label class="field">
+          <span>Max players <output id="maxOut">4</output></span>
+          <input id="maxPlayers" type="range" min="2" max="4" value="4">
+        </label>
+        <label class="field checkbox">
+          <input id="garbageOn" type="checkbox" checked>
+          <span>Garbage attack (versus)</span>
+        </label>
+        <label class="field checkbox">
+          <input id="privateRoom" type="checkbox">
+          <span>Private room</span>
+        </label>
+      </div>
+      <button id="btnCreate" class="btn btn-primary btn-lg btn-block">Create room</button>
+    </div>
+
+    <footer class="credits">
+      <p>Solo mode runs entirely on this device. Multiplayer needs the game server.</p>
+      <a href="https://github.com" target="_blank" rel="noopener">Source on GitHub</a>
+    </footer>
+  </section>
+
+  <!-- ================================================================ LOBBY -->
+  <section id="lobby" class="screen">
+    <header class="bar">
+      <button id="lobbyBack" class="btn btn-ghost">&larr; Menu</button>
+      <div class="room-title">
+        <h1>Room <span id="lobbyCode" class="code-chip">-----</span></h1>
+        <p id="lobbyMode" class="muted"></p>
+      </div>
+      <button id="btnShare" class="btn btn-ghost">Share invite</button>
+    </header>
+
+    <div class="lobby-body">
+      <div class="panel">
+        <h2>Players <span id="lobbyPlayerCount" class="badge">0/4</span></h2>
+        <ul id="lobbyPlayers" class="player-list"></ul>
+        <div class="lobby-actions">
+          <button id="btnReady" class="btn btn-primary">Ready</button>
+          <button id="btnStart" class="btn">Start match</button>
+        </div>
+        <p id="lobbyHint" class="muted small"></p>
+      </div>
+
+      <div class="panel">
+        <h2>Chat</h2>
+        <div id="chatLog" class="chat-log"></div>
+        <div class="join-row">
+          <input id="chatInput" type="text" maxlength="200" placeholder="Say something" autocomplete="off">
+          <button id="btnSendChat" class="btn">Send</button>
+        </div>
+      </div>
+
+      <div class="panel host-panel">
+        <h2>Settings <span id="hostBadge" class="badge hidden">host</span></h2>
+        <div class="mode-grid" id="lobbyModePicker">
+          <button class="mode-btn" data-mode="marathon"><strong>Marathon</strong><small>Highest score wins.</small></button>
+          <button class="mode-btn" data-mode="sprint"><strong>Sprint</strong><small>Race to the line goal.</small></button>
+          <button class="mode-btn" data-mode="versus"><strong>Versus</strong><small>Garbage attack.</small></button>
+        </div>
+        <div class="settings-grid">
+          <label class="field">
+            <span>Start level <output id="lobbyLevelOut">1</output></span>
+            <input id="lobbyStartLevel" type="range" min="1" max="15" value="1">
+          </label>
+          <label class="field">
+            <span>Sprint goal <output id="lobbyGoalOut">40</output></span>
+            <input id="lobbyLinesToWin" type="range" min="10" max="100" step="5" value="40">
+          </label>
+          <label class="field checkbox">
+            <input id="lobbyGarbage" type="checkbox" checked>
+            <span>Garbage attack</span>
+          </label>
+        </div>
+        <p class="muted small">Only the host can change settings and start the match.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================= GAME -->
+  <section id="game" class="screen">
+    <div id="stage">
+      <div class="hud hud-left">
+        <div class="panel-mini">
+          <span class="label">Score</span>
+          <strong id="hudScore">0</strong>
+        </div>
+        <div class="panel-mini">
+          <span class="label">Lines</span>
+          <strong id="hudLines">0</strong>
+        </div>
+        <div class="panel-mini">
+          <span class="label">Level</span>
+          <strong id="hudLevel">1</strong>
+        </div>
+        <div class="panel-mini">
+          <span class="label">Time</span>
+          <strong id="hudTime">0:00</strong>
+        </div>
+      </div>
+
+      <div class="board-wrap">
+        <div id="boardFrame" class="board-frame">
+          <canvas id="board" width="320" height="640"></canvas>
+          <div id="flashOverlay" class="flash-overlay"></div>
+          <div id="countdown" class="countdown hidden"></div>
+        </div>
+        <div id="touchPad" class="touch-pad hidden">
+          <button class="tbtn" data-act="left" aria-label="Left">&#9664;</button>
+          <button class="tbtn" data-act="rotcw" aria-label="Rotate">&#8635;</button>
+          <button class="tbtn" data-act="right" aria-label="Right">&#9654;</button>
+          <button class="tbtn" data-act="rotccw" aria-label="Rotate back">&#8634;</button>
+          <button class="tbtn tbtn-drop" data-act="drop" aria-label="Drop">&#9660;</button>
+        </div>
+      </div>
+
+      <div class="hud hud-right">
+        <div class="hold-box panel-mini">
+          <span class="label">Hold</span>
+          <canvas id="holdCanvas" width="120" height="100"></canvas>
+        </div>
+        <div class="next-box panel-mini">
+          <span class="label">Next</span>
+          <canvas id="nextCanvas" width="120" height="320"></canvas>
+        </div>
+        <div id="opponents" class="opponents"></div>
+      </div>
+    </div>
+
+    <div id="gameOver" class="overlay hidden">
+      <div class="panel overlay-panel">
+        <h2 id="overTitle">Match over</h2>
+        <ol id="finalScores" class="final-scores"></ol>
+        <div class="btn-grid">
+          <button id="btnAgain" class="btn btn-primary">Play again</button>
+          <button id="btnQuit" class="btn">Back to menu</button>
+        </div>
+      </div>
+    </div>
+
+    <button id="btnPause" class="btn btn-ghost pause-btn" title="Pause (Esc)">&#10073;&#10073;</button>
+  </section>
+
+  <!-- ================================================================ PAUSE -->
+  <div id="pause" class="overlay hidden">
+    <div class="panel overlay-panel">
+      <h2>Paused</h2>
+      <div class="btn-grid btn-col">
+        <button id="btnResume" class="btn btn-primary">Resume</button>
+        <button id="btnRestart" class="btn">Restart</button>
+        <button id="btnLeave" class="btn">Leave room</button>
+      </div>
+      <div class="key-help">
+        <h3>Controls</h3>
+        <ul>
+          <li><kbd>&larr;</kbd><kbd>&rarr;</kbd> move</li>
+          <li><kbd>&darr;</kbd> soft drop</li>
+          <li><kbd>Space</kbd> hard drop</li>
+          <li><kbd>&uarr;</kbd>/<kbd>X</kbd> rotate</li>
+          <li><kbd>Z</kbd> rotate back</li>
+          <li><kbd>C</kbd>/<kbd>Shift</kbd> hold</li>
+          <li><kbd>Esc</kbd> pause</li>
+        </ul>
+        <label class="field checkbox">
+          <input id="soundToggle" type="checkbox" checked>
+          <span>Sound effects</span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================== TOASTS -->
+  <div id="toasts" class="toasts"></div>
+
+  <div id="connBanner" class="conn-banner hidden">
+    <span id="connText">Disconnected</span>
+    <button id="btnReconnect" class="btn btn-sm">Reconnect</button>
+  </div>
+
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

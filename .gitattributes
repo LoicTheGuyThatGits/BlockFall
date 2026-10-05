@@ -1,0 +1,6 @@
+# Keep line endings stable across platforms so diffs stay clean.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.woff2 binary

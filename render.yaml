@@ -1,0 +1,15 @@
+# Render blueprint. Create a Blueprint at render.com from this repo, or use
+# the deploy button in the README. Node 22 is the runtime, no build step.
+services:
+  - type: web
+    name: blockfall
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
